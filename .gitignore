@@ -2,3 +2,8 @@
 __pycache__/
 *.pyc
 *.pyo
+venv/
+help_chk.log
+help_chk.txt
+table.txt
+test_diff.py
