@@ -1,104 +1,149 @@
 import os
 import customtkinter as ctk
 from dotenv import load_dotenv, set_key
-
+from tkinter import messagebox
 import threading
-# Importar nossas classes de banco de dados recém-criadas
+
+# Importar nossas classes de banco de dados
 from core import ConexaoFirebird, ConexaoMySQL
 from migrador_clientes import MigradorClientes
 
 # Carrega as variáveis de ambiente do arquivo .env
 load_dotenv()
 
+
+# =============================================================================
+# CORES DO TEMA (inspirado no Delphi)
+# =============================================================================
+COR_FUNDO_PRINCIPAL = "#1E1E2E"    # Fundo geral escuro
+COR_SIDEBAR = "#2B2B40"            # Sidebar mais escura
+COR_HEADER = "#3D3D5C"             # Barra de título
+COR_CARD = "#363650"               # Cards dos botões
+COR_TEXTO = "#FFFFFF"             # Texto claro (branco)
+COR_TEXTO_SECUNDARIO = "#FFFFFF"  # Texto secundário
+COR_ACCENT = "#6C63FF"            # Cor de destaque (botões)
+COR_DANGER = "#E74C3C"            # Vermelho (Truncate)
+COR_DANGER_HOVER = "#C0392B"
+COR_SUCCESS = "#27AE60"           # Verde (Migrar)
+COR_SUCCESS_HOVER = "#219A52"
+COR_CONFIG = "#5B86E5"            # Azul (Configurar)
+COR_CONFIG_HOVER = "#4A70C4"
+COR_LOG_BG = "#1A1A2E"            # Fundo do log
+COR_PROGRESS_BG = "#2B2B40"       # Fundo barra de progresso
+COR_PROGRESS_FG = "#6C63FF"       # Frente barra de progresso
+
+
+# =============================================================================
+# JANELA DE CONFIGURAÇÕES
+# =============================================================================
 class JanelaConfiguracoes(ctk.CTkToplevel):
-    # Recebemos 'parent' para sabermos quem é nossa tela principal
     def __init__(self, parent, *args, **kwargs):
         super().__init__(parent, *args, **kwargs)
-        self.parent = parent  # Vamos guardar isso para jogar os logs lá na tela principal
-        self.title("Configurações do Banco de Dados")
-        # Definimos o tamanho desejado para o Pop-Up
-        largura_janela = 450
-        altura_janela = 550
-        # Pegamos a resolução do Monitor
+        self.parent = parent
+        self.title("⚙️ Configurações")
+        self.configure(fg_color=COR_FUNDO_PRINCIPAL)
+
+        # Centralizar a janela
+        largura_janela = 480
+        altura_janela = 580
         largura_tela = self.winfo_screenwidth()
         altura_tela = self.winfo_screenheight()
-        # Calculamos as posições X e Y
         pos_x = int((largura_tela / 2) - (largura_janela / 2))
         pos_y = int((altura_tela / 2) - (altura_janela / 2))
-        # Passamos a nova string geometry: "LARGURAxALTURA+EIXO_X+EIXO_Y"
         self.geometry(f"{largura_janela}x{altura_janela}+{pos_x}+{pos_y}")
+        self.resizable(False, False)
 
-        # Comportamento modal (trava a tela de trás)
+        # Modal
         self.grab_set()
 
-        # =========================================================
-        # FRAME ÚNICO: Configurações na janela separada
-        # =========================================================
-        # CTkScrollableFrame permite rolagem caso a tela seja pequena
-        self.frame_config = ctk.CTkScrollableFrame(self)
-        self.frame_config.pack(fill="both", expand=True, padx=10, pady=10)
+        # Frame com scroll
+        self.frame_config = ctk.CTkScrollableFrame(
+            self, fg_color=COR_SIDEBAR, corner_radius=12,
+            scrollbar_button_color=COR_ACCENT
+        )
+        self.frame_config.pack(fill="both", expand=True, padx=15, pady=15)
 
-        # --- Seção Firebird ---
-        self.lbl_fb_title = ctk.CTkLabel(self.frame_config, text="🔥 Conexão Firebird 3", font=("", 16, "bold"))
-        self.lbl_fb_title.pack(pady=(10, 5), padx=10, anchor="w")
+        # ── Seção Firebird ──────────────────────────────────────
+        self._criar_titulo_secao("🔥 Conexão Firebird (Origem)")
 
-        # Frame Host e Porta
         self.frame_fb_hp = ctk.CTkFrame(self.frame_config, fg_color="transparent")
-        self.frame_fb_hp.pack(fill="x", padx=10, pady=5)
+        self.frame_fb_hp.pack(fill="x", padx=12, pady=4)
 
-        self.entry_fb_host = ctk.CTkEntry(self.frame_fb_hp, placeholder_text="Host (ex: localhost)")
-        self.entry_fb_host.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.entry_fb_host = self._criar_entry(self.frame_fb_hp, "Host (ex: localhost)", pack_side="left", expand=True)
         self.entry_fb_host.insert(0, os.getenv("FB_HOST", "localhost"))
 
-        self.entry_fb_port = ctk.CTkEntry(self.frame_fb_hp, placeholder_text="Porta (ex: 3050)", width=100)
-        self.entry_fb_port.pack(side="right")
+        self.entry_fb_port = self._criar_entry(self.frame_fb_hp, "Porta", pack_side="right", width=90)
         self.entry_fb_port.insert(0, os.getenv("FB_PORT", "3050"))
 
+        # Caminho do banco + botão Procurar
         self.frame_fb_path = ctk.CTkFrame(self.frame_config, fg_color="transparent")
-        self.frame_fb_path.pack(fill="x", padx=10, pady=5)
+        self.frame_fb_path.pack(fill="x", padx=12, pady=4)
 
-        self.entry_fb_path = ctk.CTkEntry(self.frame_fb_path, placeholder_text="Caminho do Banco (.fdb ou .ibl)")
-        self.entry_fb_path.pack(side="left", fill="x", expand=True, padx=(0, 5))
-
-        self.btn_browse_fb = ctk.CTkButton(self.frame_fb_path, text="Procurar...", width=80, command=self.procurar_banco)
-        self.btn_browse_fb.pack(side="right")
-
+        self.entry_fb_path = self._criar_entry(self.frame_fb_path, "Caminho do Banco (.fdb / .ibl)", pack_side="left", expand=True)
         if os.getenv("FB_PATH"):
             self.entry_fb_path.insert(0, os.getenv("FB_PATH"))
 
-        self.entry_fb_user = ctk.CTkEntry(self.frame_config, placeholder_text="Usuário (ex: SYSDBA)")
-        self.entry_fb_user.pack(fill="x", padx=10, pady=5)
+        self.btn_browse_fb = ctk.CTkButton(
+            self.frame_fb_path, text="📁", width=40, height=32,
+            fg_color=COR_CARD, hover_color=COR_ACCENT,
+            command=self.procurar_banco
+        )
+        self.btn_browse_fb.pack(side="right", padx=(5, 0))
+
+        self.entry_fb_user = self._criar_entry(self.frame_config, "Usuário (ex: SYSDBA)")
         self.entry_fb_user.insert(0, os.getenv("FB_USER", "SYSDBA"))
 
-        self.entry_fb_pass = ctk.CTkEntry(self.frame_config, placeholder_text="Senha", show="*")
-        self.entry_fb_pass.pack(fill="x", padx=10, pady=5)
+        self.entry_fb_pass = self._criar_entry(self.frame_config, "Senha", show="*")
         self.entry_fb_pass.insert(0, os.getenv("FB_PASS", "masterkey"))
 
-        # --- Seção MySQL ---
-        self.lbl_my_title = ctk.CTkLabel(self.frame_config, text="🐬 Conexão MySQL 8", font=("", 16, "bold"))
-        self.lbl_my_title.pack(pady=(20, 5), padx=10, anchor="w")
+        # ── Seção MySQL ─────────────────────────────────────────
+        self._criar_titulo_secao("🐬 Conexão MySQL (Destino)")
 
-        self.entry_my_host = ctk.CTkEntry(self.frame_config, placeholder_text="Host (ex: localhost)")
-        self.entry_my_host.pack(fill="x", padx=10, pady=5)
+        self.entry_my_host = self._criar_entry(self.frame_config, "Host (ex: localhost)")
         self.entry_my_host.insert(0, os.getenv("MYSQL_HOST", "localhost"))
 
-        self.entry_my_db = ctk.CTkEntry(self.frame_config, placeholder_text="Nome do Banco de Dados")
-        self.entry_my_db.pack(fill="x", padx=10, pady=5)
+        self.entry_my_db = self._criar_entry(self.frame_config, "Nome do Banco de Dados")
         if os.getenv("MYSQL_DB"):
             self.entry_my_db.insert(0, os.getenv("MYSQL_DB"))
 
-        self.entry_my_user = ctk.CTkEntry(self.frame_config, placeholder_text="Usuário (ex: root)")
-        self.entry_my_user.pack(fill="x", padx=10, pady=5)
+        self.entry_my_user = self._criar_entry(self.frame_config, "Usuário (ex: root)")
         self.entry_my_user.insert(0, os.getenv("MYSQL_USER", "root"))
 
-        self.entry_my_pass = ctk.CTkEntry(self.frame_config, placeholder_text="Senha", show="*")
-        self.entry_my_pass.pack(fill="x", padx=10, pady=5)
+        self.entry_my_pass = self._criar_entry(self.frame_config, "Senha", show="*")
         if os.getenv("MYSQL_PASS"):
-             self.entry_my_pass.insert(0, os.getenv("MYSQL_PASS"))
-             
-        # O botão Testar Conexões vem pra cá!
-        self.btn_test_conn = ctk.CTkButton(self.frame_config, text="🔌 Testar Conexões", command=self.teste_conexoes)
-        self.btn_test_conn.pack(fill="x", padx=10, pady=(30, 20))
+            self.entry_my_pass.insert(0, os.getenv("MYSQL_PASS"))
+
+        # ── Botão Testar ────────────────────────────────────────
+        self.btn_test_conn = ctk.CTkButton(
+            self.frame_config, text="🔌  Testar Conexões", height=42,
+            font=("", 14, "bold"),
+            fg_color=COR_CONFIG, hover_color=COR_CONFIG_HOVER,
+            command=self.teste_conexoes
+        )
+        self.btn_test_conn.pack(fill="x", padx=12, pady=(25, 10))
+
+    # ── Helpers ──────────────────────────────────────────────────
+    def _criar_titulo_secao(self, texto):
+        lbl = ctk.CTkLabel(
+            self.frame_config, text=texto,
+            font=("", 15, "bold"), text_color=COR_ACCENT, anchor="w"
+        )
+        lbl.pack(fill="x", padx=12, pady=(18, 6))
+
+    def _criar_entry(self, parent, placeholder, pack_side=None, expand=False, width=None, show=None):
+        kwargs = {"placeholder_text": placeholder, "height": 32, "fg_color": COR_FUNDO_PRINCIPAL,
+                  "border_color": COR_CARD, "text_color": COR_TEXTO, "corner_radius": 8}
+        if width:
+            kwargs["width"] = width
+        if show:
+            kwargs["show"] = show
+
+        entry = ctk.CTkEntry(parent, **kwargs)
+        if pack_side:
+            entry.pack(side=pack_side, fill="x" if expand else None, expand=expand, padx=(0, 5) if pack_side == "left" else 0)
+        else:
+            entry.pack(fill="x", padx=12, pady=4)
+        return entry
 
     def procurar_banco(self):
         caminho_arquivo = ctk.filedialog.askopenfilename(
@@ -108,17 +153,14 @@ class JanelaConfiguracoes(ctk.CTkToplevel):
         if caminho_arquivo:
             self.entry_fb_path.delete(0, "end")
             self.entry_fb_path.insert(0, caminho_arquivo)
-            # Salva o novo caminho no arquivo .env
             env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
             if not os.path.exists(env_path):
                 open(env_path, 'a').close()
             set_key(env_path, "FB_PATH", caminho_arquivo)
 
     def teste_conexoes(self):
-        """A ação de testar agora pertence à janela de configurações"""
-        # Perceba que usamos "self.parent.log_message" para imprimir na tela preta que está atrás!
         self.parent.log_message("\n> [Iniciando] Testando Conexões...")
-        
+
         path_fb = self.entry_fb_path.get()
         user_fb = self.entry_fb_user.get()
         pass_fb = self.entry_fb_pass.get()
@@ -129,18 +171,17 @@ class JanelaConfiguracoes(ctk.CTkToplevel):
             self.parent.log_message("⚠️ Caminho do Firebird está vazio.")
             return
 
-        # Converter a porta para inteiro se existir
         port_fb_int = int(port_fb) if port_fb.isdigit() else 3050
 
         fb = ConexaoFirebird(path_fb, user_fb, pass_fb, host_fb, port_fb_int)
         sucesso_fb, msg_fb = fb.conectar()
-        
+
         if sucesso_fb:
             self.parent.log_message(f"✅ {msg_fb}")
             fb.desconectar()
         else:
             self.parent.log_message(f"❌ {msg_fb}")
-            return # Aborta
+            return
 
         host_my = self.entry_my_host.get()
         user_my = self.entry_my_user.get()
@@ -148,161 +189,438 @@ class JanelaConfiguracoes(ctk.CTkToplevel):
         db_my = self.entry_my_db.get()
 
         if not db_my:
-            self.parent.log_message("⚠️ Nome do bando de dados MySQL está vazio.")
+            self.parent.log_message("⚠️ Nome do banco de dados MySQL está vazio.")
             return
 
         my = ConexaoMySQL(host_my, user_my, pass_my, db_my)
         sucesso_my, msg_my = my.conectar()
 
         if sucesso_my:
+            self.parent.log_message(f"✅ {msg_my}")
             my.desconectar()
         else:
             self.parent.log_message(f"❌ {msg_my}")
-            return 
+            return
 
-        # Salva as configurações de conexão testadas (com sucesso) no .env
+        # Salvar no .env
         env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
         if not os.path.exists(env_path):
             open(env_path, 'a').close()
-        
+
         set_key(env_path, "FB_HOST", host_fb)
         set_key(env_path, "FB_PORT", port_fb)
         set_key(env_path, "FB_PATH", path_fb)
         set_key(env_path, "FB_USER", user_fb)
         set_key(env_path, "FB_PASS", pass_fb)
-        
+
         set_key(env_path, "MYSQL_HOST", host_my)
         if db_my: set_key(env_path, "MYSQL_DB", db_my)
         set_key(env_path, "MYSQL_USER", user_my)
         set_key(env_path, "MYSQL_PASS", pass_my)
 
-        self.parent.log_message("🎉 Sucesso! Ambos os bancos estão comunicando perfeitamente e as configurações foram salvas.")
-        # Libera o botão "🚀 Iniciar Migração" que está na janela pai!
-        self.parent.btn_migrar.configure(state="normal")
-        # Fecha essa janela filha
-        self.destroy() 
+        self.parent.log_message("🎉 Conexões testadas com sucesso! Configurações salvas.")
+        # Habilita os botões de migração
+        self.parent.conexoes_ok = True
+        self.parent.atualizar_estado_botoes()
+        self.destroy()
 
 
+# =============================================================================
+# APLICAÇÃO PRINCIPAL
+# =============================================================================
 class AppMigrador(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Migrador Futura: Firebird 3 ➔ MySQL 8")
-        
-        # --- Lógica de Centralização (Tela Principal) ---
-        largura_janela = 900
-        altura_janela = 650
+        self.title("Migrador Futura")
+        self.configure(fg_color=COR_FUNDO_PRINCIPAL)
+
+        # ── Centralizar janela ───────────────────────────────────
+        largura_janela = 1050
+        altura_janela = 700
         largura_tela = self.winfo_screenwidth()
         altura_tela = self.winfo_screenheight()
         pos_x = int((largura_tela / 2) - (largura_janela / 2))
         pos_y = int((altura_tela / 2) - (altura_janela / 2))
         self.geometry(f"{largura_janela}x{altura_janela}+{pos_x}+{pos_y}")
-        # ------------------------------------------------
-        
+
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
-        self.grid_columnconfigure(0, weight=1) 
-        self.grid_columnconfigure(1, weight=2) 
-        self.grid_rowconfigure(0, weight=1)              
+        # Estado interno
+        self.conexoes_ok = False
+        self.id_loja = None  # Em memória, nunca salvo no .env
 
-        # =========================================================
-        # FRAME ESQUERDO: Ações Limpas e Simplificadas
-        # =========================================================
-        self.frame_esq = ctk.CTkFrame(self)
-        self.frame_esq.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        # Spinner / animação de loading
+        self._spinner_ativo = False
+        self._spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        self._spinner_idx = 0
+        self._spinner_after_id = None
 
-        # Olha o botão da engrenagem aqui limpinho!
-        self.btn_config = ctk.CTkButton(self.frame_esq, text="⚙️ Configurar Bancos", command=self.abrir_configuracoes)
-        self.btn_config.pack(fill="x", padx=10, pady=(30, 10))
+        # ── Layout principal: 3 linhas (header, corpo, footer) ──
+        self.grid_rowconfigure(0, weight=0)  # header
+        self.grid_rowconfigure(1, weight=1)  # corpo
+        self.grid_rowconfigure(2, weight=0)  # footer
+        self.grid_columnconfigure(0, weight=0)  # sidebar
+        self.grid_columnconfigure(1, weight=1)  # log
 
-        # Frame para agrupar botões e opções da migração de Clientes
-        self.frame_mig_clientes = ctk.CTkFrame(self.frame_esq)
-        self.frame_mig_clientes.pack(fill="x", padx=10, pady=10)
+        # =============================================================
+        # HEADER
+        # =============================================================
+        self.frame_header = ctk.CTkFrame(self, fg_color=COR_HEADER, corner_radius=0, height=50)
+        self.frame_header.grid(row=0, column=0, columnspan=2, sticky="ew")
+        self.frame_header.grid_propagate(False)
 
-        # Botão principal que só será habilitado após conexões com sucesso
-        self.btn_migrar = ctk.CTkButton(self.frame_mig_clientes, text="🚀 Migrar Clientes", fg_color="green", hover_color="darkgreen", command=self.iniciar_migracao, state="disabled")
-        self.btn_migrar.pack(fill="x", padx=10, pady=(10, 5))
+        self.lbl_titulo = ctk.CTkLabel(
+            self.frame_header, text="⚡  Migrador Futura  ⚡",
+            font=("", 22, "bold"), text_color="#FFFFFF"
+        )
+        self.lbl_titulo.pack(expand=True)
 
-        # O usuário pediu para o texto não ser clicável, então separamos a checkbox do texto (Label)
-        self.frame_chk_trunc = ctk.CTkFrame(self.frame_mig_clientes, fg_color="transparent")
-        self.frame_chk_trunc.pack(fill="x", padx=10, pady=(0, 10))
+        # =============================================================
+        # SIDEBAR (coluna esquerda)
+        # =============================================================
+        self.frame_sidebar = ctk.CTkFrame(self, fg_color=COR_SIDEBAR, corner_radius=0, width=230)
+        self.frame_sidebar.grid(row=1, column=0, sticky="nsew")
+        self.frame_sidebar.grid_propagate(False)
 
-        self.chk_var_truncar = ctk.BooleanVar(value=False)
-        self.chk_truncar = ctk.CTkCheckBox(self.frame_chk_trunc, text="", variable=self.chk_var_truncar, width=20)
-        self.chk_truncar.pack(side="left")
+        # ── ID Loja ──────────────────────────────────────────────
+        self.frame_idloja = ctk.CTkFrame(self.frame_sidebar, fg_color=COR_CARD, corner_radius=10)
+        self.frame_idloja.pack(fill="x", padx=12, pady=(15, 8))
 
-        self.lbl_chk_truncar = ctk.CTkLabel(self.frame_chk_trunc, text="Limpar tabela antes (Truncate)")
-        self.lbl_chk_truncar.pack(side="left", padx=(5, 0))
+        lbl_idloja_icon = ctk.CTkLabel(
+            self.frame_idloja, text="🏪  ID Loja",
+            font=("", 13, "bold"), text_color=COR_TEXTO, anchor="w"
+        )
+        lbl_idloja_icon.pack(fill="x", padx=12, pady=(8, 2))
 
+        self.entry_idloja = ctk.CTkEntry(
+            self.frame_idloja, placeholder_text="Nº da Loja",
+            height=32, fg_color=COR_FUNDO_PRINCIPAL,
+            border_color=COR_ACCENT, text_color=COR_TEXTO,
+            justify="center", font=("", 14, "bold"), corner_radius=8
+        )
+        self.entry_idloja.pack(fill="x", padx=12, pady=(2, 10))
 
-        # =========================================================
-        # FRAME DIREITO: Logs Gerais e Progresso
-        # =========================================================
-        self.frame_dir = ctk.CTkFrame(self)
-        self.frame_dir.grid(row=0, column=1, padx=(0, 10), pady=10, sticky="nsew")
+        # ── Botão Configurar ─────────────────────────────────────
+        self.btn_config = ctk.CTkButton(
+            self.frame_sidebar, text="⚙️  Configurar Bancos",
+            font=("", 13, "bold"), height=40,
+            fg_color=COR_CONFIG, hover_color=COR_CONFIG_HOVER,
+            text_color="#FFFFFF", corner_radius=10,
+            command=self.abrir_configuracoes
+        )
+        self.btn_config.pack(fill="x", padx=12, pady=(8, 5))
 
-        self.lbl_log_title = ctk.CTkLabel(self.frame_dir, text="📋 Progresso e Logs da Migração", font=("", 16, "bold"))
-        self.lbl_log_title.pack(pady=(10, 5), anchor="w", padx=10)
+        # ── Separador ────────────────────────────────────────────
+        sep1 = ctk.CTkFrame(self.frame_sidebar, fg_color=COR_CARD, height=2)
+        sep1.pack(fill="x", padx=20, pady=10)
 
-        self.progress_bar = ctk.CTkProgressBar(self.frame_dir)
-        self.progress_bar.pack(fill="x", padx=10, pady=(5, 15))
-        self.progress_bar.set(0) 
+        # ── Botão Migrar Cliente ─────────────────────────────────
+        self.frame_mig_cliente = self._criar_botao_migracao(
+            emoji="👥", titulo="Migrar Cliente",
+            cor_btn=COR_SUCCESS, cor_hover=COR_SUCCESS_HOVER,
+            comando=self.iniciar_migracao_clientes
+        )
 
-        self.txt_log = ctk.CTkTextbox(self.frame_dir, font=("Consolas", 12))
-        self.txt_log.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-        
-        self.log_message("Sistema iniciado. Clique em 'Configurar Bancos'.\n")
+        # ── Separador ────────────────────────────────────────────
+        sep2 = ctk.CTkFrame(self.frame_sidebar, fg_color=COR_CARD, height=2)
+        sep2.pack(fill="x", padx=20, pady=10)
+
+        # ── Botão Truncate ───────────────────────────────────────
+        self.btn_truncate = ctk.CTkButton(
+            self.frame_sidebar, text="❌  Truncate",
+            font=("", 13, "bold"), height=40,
+            fg_color=COR_DANGER, hover_color=COR_DANGER_HOVER,
+            text_color="#FFFFFF", text_color_disabled="#AAAAAA",
+            corner_radius=10,
+            command=self.executar_truncate
+        )
+        self.btn_truncate.pack(fill="x", padx=12, pady=(5, 10))
+
+        # ── Espaçador inferior (empurra crédito para baixo) ──────
+        spacer = ctk.CTkFrame(self.frame_sidebar, fg_color="transparent")
+        spacer.pack(fill="both", expand=True)
+
+        lbl_versao = ctk.CTkLabel(
+            self.frame_sidebar, text="v1.0 • Python + CustomTkinter",
+            font=("", 10), text_color=COR_TEXTO_SECUNDARIO
+        )
+        lbl_versao.pack(pady=(0, 10))
+
+        # =============================================================
+        # PAINEL DIREITO (Log)
+        # =============================================================
+        self.frame_log = ctk.CTkFrame(self, fg_color=COR_FUNDO_PRINCIPAL, corner_radius=0)
+        self.frame_log.grid(row=1, column=1, sticky="nsew", padx=(0, 0), pady=(0, 0))
+
+        self.lbl_log_title = ctk.CTkLabel(
+            self.frame_log, text="📋  Log da Migração",
+            font=("", 17, "bold"), text_color=COR_TEXTO, anchor="w"
+        )
+        self.lbl_log_title.pack(fill="x", padx=15, pady=(12, 8))
+
+        self.txt_log = ctk.CTkTextbox(
+            self.frame_log, font=("Consolas", 12),
+            fg_color=COR_LOG_BG, text_color="#C8C8DC",
+            corner_radius=10, border_width=1, border_color=COR_CARD,
+            wrap="word"
+        )
+        self.txt_log.pack(fill="both", expand=True, padx=15, pady=(0, 10))
+
+        # =============================================================
+        # FOOTER (Barra de Progresso)
+        # =============================================================
+        self.frame_footer = ctk.CTkFrame(self, fg_color=COR_HEADER, corner_radius=0, height=35)
+        self.frame_footer.grid(row=2, column=0, columnspan=2, sticky="ew")
+        self.frame_footer.grid_propagate(False)
+
+        self.lbl_progress_pct = ctk.CTkLabel(
+            self.frame_footer, text="0%",
+            font=("", 12, "bold"), text_color=COR_TEXTO, width=50
+        )
+        self.lbl_progress_pct.pack(side="left", padx=(15, 5))
+
+        self.progress_bar = ctk.CTkProgressBar(
+            self.frame_footer, height=14,
+            fg_color=COR_PROGRESS_BG, progress_color=COR_PROGRESS_FG,
+            corner_radius=7
+        )
+        self.progress_bar.pack(side="left", fill="x", expand=True, padx=(0, 10), pady=8)
+        self.progress_bar.set(0)
+
+        self.lbl_progress_info = ctk.CTkLabel(
+            self.frame_footer, text="%",
+            font=("", 12, "bold"), text_color=COR_TEXTO, width=30
+        )
+        self.lbl_progress_info.pack(side="right", padx=(0, 15))
+
+        # ── Log inicial ─────────────────────────────────────────
+        self.log_message("Sistema iniciado.")
+        self.log_message("Clique em '⚙️ Configurar Bancos' para começar.\n")
+
+        # Estado inicial dos botões
+        self.atualizar_estado_botoes()
+
+    # =================================================================
+    # MÉTODOS AUXILIARES
+    # =================================================================
+
+    def _criar_botao_migracao(self, emoji, titulo, cor_btn, cor_hover, comando):
+        """Cria um card com botão de migração + checkbox de truncate."""
+        frame = ctk.CTkFrame(self.frame_sidebar, fg_color=COR_CARD, corner_radius=10)
+        frame.pack(fill="x", padx=12, pady=4)
+
+        btn = ctk.CTkButton(
+            frame, text=f"{emoji}  {titulo}",
+            font=("", 13, "bold"), height=38,
+            fg_color=cor_btn, hover_color=cor_hover,
+            text_color="#FFFFFF", text_color_disabled="#AAAAAA",
+            corner_radius=8, command=comando
+        )
+        btn.pack(fill="x", padx=8, pady=(8, 4))
+
+        # Checkbox truncate dentro do card
+        chk_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        chk_frame.pack(fill="x", padx=8, pady=(0, 8))
+
+        chk_var = ctk.BooleanVar(value=False)
+        chk = ctk.CTkCheckBox(
+            chk_frame, text="Truncar antes",
+            variable=chk_var, font=("", 11),
+            text_color="#FFFFFF",
+            checkbox_width=18, checkbox_height=18,
+            corner_radius=4
+        )
+        chk.pack(anchor="w")
+
+        # Guardar referências
+        frame.btn = btn
+        frame.chk_var = chk_var
+        return frame
+
+    def atualizar_estado_botoes(self):
+        """Habilita/desabilita botões de migração conforme o estado."""
+        estado = "normal" if self.conexoes_ok else "disabled"
+        self.frame_mig_cliente.btn.configure(state=estado)
+        self.btn_truncate.configure(state=estado)
+
+    def validar_id_loja(self):
+        """Valida se o ID Loja foi informado. Retorna o valor ou None."""
+        valor = self.entry_idloja.get().strip()
+        if not valor:
+            messagebox.showwarning(
+                "ID Loja Obrigatório",
+                "Por favor, informe o número da Loja (ID Loja) antes de continuar.\n\n"
+                "Este campo é obrigatório para a migração.",
+                parent=self
+            )
+            self.entry_idloja.focus_set()
+            return None
+
+        if not valor.isdigit():
+            messagebox.showerror(
+                "ID Loja Inválido",
+                "O ID Loja deve ser um número inteiro.",
+                parent=self
+            )
+            self.entry_idloja.focus_set()
+            return None
+
+        self.id_loja = int(valor)
+        return self.id_loja
 
     def log_message(self, mensagem):
         self.txt_log.insert("end", mensagem + "\n")
-        self.txt_log.see("end") 
+        self.txt_log.see("end")
 
-    def iniciar_migracao(self):
+    def atualizar_progresso(self, valor, texto=None):
+        """Atualiza barra de progresso (0.0 a 1.0) e label de percentual."""
+        self.progress_bar.configure(mode="determinate")
+        self.progress_bar.set(valor)
+        pct = int(valor * 100)
+        self.lbl_progress_pct.configure(text=f"{pct}%")
+        if texto:
+            self.lbl_progress_info.configure(text=texto)
+
+    def iniciar_spinner(self, texto="Processando..."):
+        """Inicia animação de spinner no footer e barra indeterminada."""
+        self._spinner_ativo = True
+        self._spinner_texto = texto
+        self.progress_bar.configure(mode="indeterminate")
+        self.progress_bar.start()
+        self._animar_spinner()
+
+    def _animar_spinner(self):
+        """Loop interno do spinner."""
+        if not self._spinner_ativo:
+            return
+        frame = self._spinner_frames[self._spinner_idx % len(self._spinner_frames)]
+        self.lbl_progress_pct.configure(text=f"{frame} {self._spinner_texto}")
+        self.lbl_progress_info.configure(text=frame)
+        self._spinner_idx += 1
+        self._spinner_after_id = self.after(100, self._animar_spinner)
+
+    def parar_spinner(self):
+        """Para a animação do spinner."""
+        self._spinner_ativo = False
+        if self._spinner_after_id:
+            self.after_cancel(self._spinner_after_id)
+            self._spinner_after_id = None
+        self.progress_bar.stop()
+        self.progress_bar.configure(mode="determinate")
+        self.progress_bar.set(0)
+        self.lbl_progress_pct.configure(text="0%")
+        self.lbl_progress_info.configure(text="%")
+
+    # =================================================================
+    # AÇÕES
+    # =================================================================
+
+    def abrir_configuracoes(self):
+        JanelaConfiguracoes(self)
+
+    def iniciar_migracao_clientes(self):
+        # Validar ID Loja
+        id_loja = self.validar_id_loja()
+        if id_loja is None:
+            return
+
         self.log_message("\n🚀 ===============================================")
-        self.log_message("🚀 [Iniciando] Processo de Migração")
+        self.log_message(f"🚀 [Iniciando] Migração de Clientes (Loja: {id_loja})")
         self.log_message("🚀 ===============================================")
-        self.btn_migrar.configure(state="disabled")
-        
-        # Recuperar conexões salvos no .env para re-instanciar (já que foram testadas)
+        self.frame_mig_cliente.btn.configure(state="disabled")
+        self.iniciar_spinner("Migrando Clientes...")
+
+        # Recuperar conexões do .env
+        load_dotenv(override=True)
         path_fb = os.getenv("FB_PATH")
         user_fb = os.getenv("FB_USER")
         pass_fb = os.getenv("FB_PASS")
         host_fb = os.getenv("FB_HOST", "localhost")
         port_fb = int(os.getenv("FB_PORT", 3050))
-        
+
         host_my = os.getenv("MYSQL_HOST")
         user_my = os.getenv("MYSQL_USER")
         pass_my = os.getenv("MYSQL_PASS")
         db_my = os.getenv("MYSQL_DB")
-        
+
         fb = ConexaoFirebird(path_fb, user_fb, pass_fb, host_fb, port_fb)
         my = ConexaoMySQL(host_my, user_my, pass_my, db_my)
-        
+
         migrador = MigradorClientes(fb, my, log_callback=self.log_message)
-        
-        truncar_antes = self.chk_var_truncar.get()
-        
-        # Executar em thread separada para não travar a interface
+
+        truncar_antes = self.frame_mig_cliente.chk_var.get()
+
         def thread_migracao():
             try:
                 sucesso = migrador.executar(truncar=truncar_antes)
                 if sucesso:
-                    self.log_message("✅ Módulo concluído.")
+                    self.after(0, lambda: self.parar_spinner())
+                    self.after(50, lambda: self.atualizar_progresso(1.0, "✅ Concluído!"))
+                    self.log_message("✅ Migração de Clientes concluída.")
                 else:
-                    self.log_message("❌ Módulo falhou.")
+                    self.after(0, lambda: self.parar_spinner())
+                    self.after(50, lambda: self.atualizar_progresso(0, "❌ Falhou"))
+                    self.log_message("❌ Migração de Clientes falhou.")
             finally:
-                # Reativa o botão na thread principal
-                self.after(0, lambda: self.btn_migrar.configure(state="normal"))
-                
+                self.after(0, lambda: self.frame_mig_cliente.btn.configure(state="normal"))
+
         threading.Thread(target=thread_migracao, daemon=True).start()
 
-    def abrir_configuracoes(self):
-        # Aqui, instanciamos a Janela de Configurações, passando `self` (A Aplicação principal)
-        # como parâmetro. Assim a Janela Filha consegue falar com a Mãe.
-        janela = JanelaConfiguracoes(self)    
+    def executar_truncate(self):
+        """Trunca as tabelas relacionadas no MySQL destino."""
+        id_loja = self.validar_id_loja()
+        if id_loja is None:
+            return
+
+        confirmar = messagebox.askyesno(
+            "⚠️ Confirmar Truncate",
+            "ATENÇÃO: Esta ação irá APAGAR todos os dados das tabelas de migração no MySQL destino.\n\n"
+            "Deseja continuar?",
+            parent=self
+        )
+        if not confirmar:
+            return
+
+        self.log_message("\n❌ ===============================================")
+        self.log_message("❌ [TRUNCATE] Limpando tabelas no MySQL destino...")
+        self.log_message("❌ ===============================================")
+
+        load_dotenv(override=True)
+        host_my = os.getenv("MYSQL_HOST")
+        user_my = os.getenv("MYSQL_USER")
+        pass_my = os.getenv("MYSQL_PASS")
+        db_my = os.getenv("MYSQL_DB")
+
+        my = ConexaoMySQL(host_my, user_my, pass_my, db_my)
+        sucesso, msg = my.conectar()
+
+        if not sucesso:
+            self.log_message(f"❌ Erro ao conectar no MySQL: {msg}")
+            return
+
+        tabelas = ["cliente"]  # Adicionar mais tabelas conforme necessário
+
+        try:
+            cursor = my.conn.cursor()
+            for tabela in tabelas:
+                try:
+                    cursor.execute(f"TRUNCATE TABLE {tabela}")
+                    self.log_message(f"  ✅ Tabela '{tabela}' truncada com sucesso.")
+                except Exception as e:
+                    self.log_message(f"  ❌ Erro ao truncar '{tabela}': {e}")
+            my.conn.commit()
+            cursor.close()
+        finally:
+            my.desconectar()
+
+        self.log_message("✅ Truncate finalizado.\n")
 
 
+# =============================================================================
+# MAIN
+# =============================================================================
 if __name__ == "__main__":
     app = AppMigrador()
     app.mainloop()
