@@ -2,19 +2,27 @@
 Migrador de Dados de Sistemas Delphi (Firebird) para Aplicação Web (MySQL/Python).
 
 ## Visão Geral
-Este é um aplicativo de conversão e extração de dados `Desktop > Web`, criado em Python utilizando `CustomTkinter` para apresentar uma interface amigável. Ele se conecta via Driver Nativo em bases de dados locais legadas (`.fdb` - Firebird) e transporta massas de dados de forma automatizada para um banco de dados destino Moderno (`MySQL 8`), permitindo filtros, tratamento de colisão de Chave Primária, otimização de queries pesadas e injeção assíncrona com `REPLACE INTO`.
+Este é um aplicativo de conversão e extração de dados `Desktop > Web`, criado em Python utilizando `CustomTkinter` para apresentar uma interface premium inspirada em layouts Delphi robustos. Ele se conecta via Driver Nativo em bases de dados locais legadas (`.fdb` - Firebird) e transporta massas de dados de forma automatizada para um banco de dados destino Moderno (`MySQL 8`).
+
+## Interface e Design 🎨
+A interface foi redesenhada para oferecer uma experiência de usuário profissional e funcional:
+* **Sidebar Escura (Estilo ERP)**: Painel lateral focado em ações e parâmetros de controle.
+* **Componentes Premium**: Uso de cores harmoniosas (`#2B2B40`), cantos arredondados e tipografia clara para redução de fadiga visual.
+* **Feedback Interativo**: 
+    - **Spinner de Animação**: Indicador visual (⠋⠙⠹) que mostra que o banco de dados está processando.
+    - **Progresso Dinâmico**: Barra de status que alterna entre modo indeterminado (durante extração) e percentual (durante gravação).
 
 ## Funcionalidades Principais 🌟
-* **Painel Interativo de Configuração**: Menu centralizado para selecionar o arquivo local `.fdb` e definir as credenciais do MySQL.
-* **Auto-Save via `.env`**: Suas configurações são guardadas imediatamente ao testar uma conexão bem-sucedida, não precisa reescrevê-las ao fechar e abrir o sistema.
-* **Validador de Encoding Nativo**: Compatibilidade com os tipos de Strings `WIN1252`/`ANSI` muito usados em bancos locais Delphi no Brasil (evita que acentuação quebre no Python e no DB destino).
-* **Migração de Clientes e Anti-Colisão**: A primeira vertente ("Migrar Clientes", módulo em `migrador_clientes.py`) puxa a tabela de Clientes (com INNER/LEFT JOINs resolvendo cidades, endereços, filiais). Inclui lógica que converte "Duplicatas de CPF/CNPJ" na origem para não serem sobregravadas no destino.
-* **Opção de Limpar (Truncate)**: Escolha visualmente se deseja limpar os registros antigos do MySQL antes de re-importar as entidades da origem.
+* **ID Loja Obrigatório**: Garantia de integridade dos dados através da validação mandatória do número da loja antes de qualquer operação.
+* **Módulos de Migração Segregados**: Migração de Clientes (funcional), Produtos e Vendas (em desenvolvimento).
+* **Parâmetros de Truncate**: Opção para limpar as tabelas de destino individualmente ou via botão global.
+* **Auto-Save via `.env`**: Configurações de conexão são salvas automaticamente após testes bem-sucedidos.
+* **Conectividade Docker-Ready**: Configuração otimizada para bancos Firebird rodando em containers Docker ou instalações locais.
 
 ## Requisitos de Sistema 🛠️
-- **Windows**: Obrigatório para encontrar as chaves corretas e interagir via Open File Dialog com bancos `C:/*`.
-- **Python 3.10+**: Com a extensão ou driver base nativa pro Firebird.
-- (A Instalação pede a biblioteca `fdb` do Firebird 2.5/3.0. Para o Windows, garante que a DLL `fbclient.dll` esteja na máquina e consertada).
+- **Windows**: Recomendado para compatibilidade total com diálogos nativos.
+- **Python 3.10+**: Necessário para execução do interpretador.
+- **Firebird Client**: Certifique-se de ter a `fbclient.dll` acessível (geralmente instalada com o servidor ou client do Firebird).
 
 ## Instalação e Execução
 
@@ -28,7 +36,7 @@ python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
 ```
-   *(Dependências inclusas: `fdb`, `mysql-connector-python`, `customtkinter`, `python-dotenv`, `loguru`)*
+*(Dependências principais: `fdb`, `mysql-connector-python`, `customtkinter`, `python-dotenv`, `loguru`)*
 
 3. Inicie a Interface Principal:
 ```bash
@@ -36,12 +44,10 @@ python main.py
 ```
 
 ## Como Usar o Migrador
-1. Ao Abrir a janela, perceba que o Botão **Migrar** está Desabilitado. Ele tranca o processo para prevenir acidentes.
-2. Clique em **Configurar Bancos** na Engrenagem `⚙️`.
-3. Escolha o banco Firebird (`Procurar...`) e defina os IPs (geralmente `localhost`), e preencha a base de dados MySQL (Ex: `migracao_futura`).
-4. Aperte o Botão **Testar Conexões**. Se ficar verde, o painel se fecha e tudo fica configurado.
-5. Na janela Principal, **Verifique** a Checkbox "*Limpar tabela antes (Truncate)*" se os registros desejados no MySQL devem sofrer Flush Total antes da conversão.
-6. Clique no botão de Ação da sua entidade escolhida (ex: `🚀 Migrar Clientes`). A Migração ocorrerá em Background 🧵 (*Multi-Thread*) enquanto os logs exibem estatísticas detalhadas do processamento ao vivo!
+1. **Configuração**: Clique no botão **⚙️ Configurar Bancos** na sidebar. Informe os dados de conexão e clique em **Testar**. Se aprovado, os botões de migração serão liberados.
+2. **ID Loja**: Preencha obrigatoriamente o campo **Nº da Loja** no topo da sidebar.
+3. **Migração**: Selecione se deseja "Truncar antes" e clique no botão da entidade (ex: **👥 Migrar Cliente**). 
+4. **Logs**: Acompanhe o processamento em tempo real no painel de log à direita.
 
 ## Segurança 🔒
-Credenciais **jamais** devem ser comitadas no GitHub. O arquivo `.env` é gerado automaticamente na raiz da pasta _apenas localmente_ e ele já está adicionado na regra do arquivo `.gitignore`. Em produção, este projeto lê diretamente as chaves de ambiente lá contidas.
+Credenciais sensíveis são armazenadas localmente no arquivo `.env`, que é ignorado pelo Git através do `.gitignore`. Nunca compartilhe seu arquivo `.env` publicamente.
