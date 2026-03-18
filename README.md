@@ -10,8 +10,8 @@ Aplicativo de conversão e extração de dados `Desktop > Web`, criado em Python
 * **Sidebar Escura (Estilo ERP)**: Painel lateral com parâmetros de controle e ações de migração.
 * **Componentes Premium**: Paleta de cores harmoniosa, cantos arredondados e tipografia clara.
 * **Feedback Interativo**:
-  - **Spinner de Animação** (⠋⠙⠹): Indicador visual durante processamento.
-  - **Barra de Progresso Dinâmica**: Modo indeterminado na extração e percentual na gravação.
+  - **Spinner de Animação** (⠋⠙⠹): Indicador visual durante extração de dados.
+  - **Barra de Progresso Determinada**: Exibe `X / total` e percentual real (0–100%) durante a gravação.
 
 ---
 
@@ -25,13 +25,21 @@ Aplicativo de conversão e extração de dados `Desktop > Web`, criado em Python
 | ⚙️ **Configurar Bancos** | Abre janela modal para configurar Firebird e MySQL, com botão de teste |
 
 ### Módulos de Migração
-| Botão | Tabela Destino | Status |
+| Botão | Tabelas Destino | Status |
 |---|---|---|
 | 👥 **Migrar Cliente** | `cliente` | ✅ Funcional |
-| 🛒 **Migrar Venda** | `venda` | ✅ Funcional |
-| ❌ **Truncate** | Todas as tabelas mapeadas | ✅ Funcional |
+| 🛒 **Migrar Venda** | `venda` + `item` | ✅ Funcional |
+| ❌ **Truncate** | `item`, `venda`, `cliente` | ✅ Funcional |
 
-Cada módulo possui checkbox **"Truncar antes"** para limpar a tabela destino antes de inserir.
+Cada módulo possui checkbox **"Truncar antes"** para limpar as tabelas destino antes de inserir.
+
+### Migração de Vendas + Itens (1-a-1)
+A migração de vendas usa a abordagem **1-a-1 com pré-carregamento**:
+
+1. Extrai todos os cabeçalhos de venda (`PEDIDO`) em uma query.
+2. Pré-carrega **todos os itens** (`PEDIDO_ITEM`) da empresa em **uma única query Firebird**, agrupando em memória por `FK_PEDIDO` — elimina ~100 mil round-trips individuais.
+3. Para cada venda: `INSERT venda` → captura `lastrowid` → `executemany(itens)` → `COMMIT` em lote a cada 500 vendas.
+4. Otimizações de sessão MySQL ativadas durante o bulk insert (`unique_checks = 0`, `foreign_key_checks = 0`).
 
 ### Log em Arquivo
 Cada migração gera automaticamente um arquivo de log em `logs/`:
@@ -51,7 +59,8 @@ Migrador_Futura_py/
 ├── main.py               # Interface principal (CustomTkinter)
 ├── core.py               # Classes de conexão Firebird e MySQL
 ├── migrador_clientes.py  # Módulo de migração de clientes
-├── migrador_vendas.py    # Módulo de migração de vendas (cabeçalho)
+├── migrador_vendas.py    # Módulo de migração de vendas (cabeçalho + orquestração)
+├── migrador_itens.py     # Módulo de migração de itens de venda (pré-carregamento)
 ├── requirements.txt      # Dependências Python
 ├── .env                  # Credenciais (ignorado pelo Git)
 └── logs/                 # Logs de migração (ignorado pelo Git)
@@ -61,7 +70,7 @@ Migrador_Futura_py/
 
 ## Requisitos de Sistema 🛠️
 - **Windows**: Recomendado para compatibilidade total com diálogos nativos.
-- **Python 3.10+**: Obrigatório (uso de type hints modernos e `match`).
+- **Python 3.10+**: Obrigatório (uso de type hints modernos).
 - **Firebird Client**: `fbclient.dll` acessível no sistema.
 
 ---
@@ -93,7 +102,8 @@ python main.py
 2. **ID Loja**: Preencha o campo **🏪 ID Loja** (obrigatório).
 3. **Empresa**: Selecione a empresa do Firebird no dropdown **🏢 Empresa**.
 4. **Migrar**: Marque "Truncar antes" se necessário e clique no módulo desejado.
-5. **Logs**: Acompanhe em tempo real no painel à direita. O arquivo de log é salvo automaticamente em `logs/`.
+5. **Progresso**: Acompanhe a barra no rodapé — spinner durante extração, percentual + contador `X / total` durante inserção.
+6. **Logs**: Acompanhe em tempo real no painel à direita. O arquivo de log é salvo automaticamente em `logs/`.
 
 ---
 

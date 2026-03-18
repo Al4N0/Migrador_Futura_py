@@ -9,6 +9,7 @@ import threading
 from core import ConexaoFirebird, ConexaoMySQL
 from migrador_clientes import MigradorClientes
 from migrador_vendas import MigradorVendas
+from migrador_itens import MigradorItens
 
 # Carrega as variáveis de ambiente do arquivo .env
 load_dotenv()
@@ -524,7 +525,7 @@ class AppMigrador(ctk.CTk):
                     LEFT JOIN (
                         SELECT FK_EMPRESA, COUNT(ID) AS QUANTIDADE_VENDA
                         FROM PEDIDO
-                        WHERE FK_TIPO_PEDIDO = 1 OR FK_TIPO_PEDIDO = 5
+                        WHERE (FK_TIPO_PEDIDO = '1' OR FK_TIPO_PEDIDO = '5')
                         GROUP BY FK_EMPRESA
                     ) P ON P.FK_EMPRESA = C.ID
                     WHERE C.CHK_EMPRESA = 'S'
@@ -755,7 +756,7 @@ class AppMigrador(ctk.CTk):
         self.log_message(f"🛒 [Iniciando] Migração de Vendas (Loja: {id_loja} | Empresa FB: {fk_empresa})")
         self.log_message("🛒 ===============================================")
         self.frame_mig_venda.btn.configure(state="disabled")
-        self.iniciar_spinner("Migrando Vendas...")
+        self.iniciar_spinner("Extraindo dados...")
 
         load_dotenv(override=True)
         path_fb = os.getenv("FB_PATH")
@@ -772,12 +773,36 @@ class AppMigrador(ctk.CTk):
         fb = ConexaoFirebird(path_fb, user_fb, pass_fb, host_fb, port_fb)
         my = ConexaoMySQL(host_my, user_my, pass_my, db_my)
 
+        # ── Callback de progresso ─────────────────────────────────────
+        # progress(0, total) → para spinner, inicia modo determinado
+        # progress(idx, total) → atualiza barra + label "X / total"
+        def _progresso(atual: int, total: int):
+            if total == 0:
+                return
+            pct = atual / total
+
+            def _atualizar():
+                if atual == 0:
+                    # Total conhecido: parar spinner e iniciar modo determinado
+                    self.parar_spinner()
+                    self.progress_bar.configure(mode="determinate")
+                    self.progress_bar.set(0)
+                    self.lbl_progress_pct.configure(text="0%")
+                    self.lbl_progress_info.configure(text=f"0 / {total:,}")
+                else:
+                    self.progress_bar.set(pct)
+                    self.lbl_progress_pct.configure(text=f"{int(pct * 100)}%")
+                    self.lbl_progress_info.configure(text=f"{atual:,} / {total:,}")
+
+            self.after(0, _atualizar)
+
         migrador = MigradorVendas(
             fb_conn=fb,
             my_conn=my,
             id_loja=id_loja,
             fk_empresa=fk_empresa,
             log_callback=self.log_message,
+            progress_callback=_progresso,
         )
 
         truncar_antes = self.frame_mig_venda.chk_var.get()
@@ -788,9 +813,11 @@ class AppMigrador(ctk.CTk):
             try:
                 sucesso = migrador.executar(truncar=truncar_antes)
                 if sucesso:
-                    self.after(0, lambda: self.parar_spinner())
-                    self.after(50, lambda: self.atualizar_progresso(1.0, "✅ Concluído!"))
-                    self.log_message(f"✅ Migração de Vendas concluída. {len(migrador.mapa_idvenda)} vendas migradas.")
+                    self.after(0, lambda: self.atualizar_progresso(1.0, "✅ Concluído!"))
+                    self.log_message(
+                        f"✅ Migração de Vendas+Itens concluída. "
+                        f"{len(migrador.mapa_idvenda):,} vendas migradas."
+                    )
                 else:
                     self.after(0, lambda: self.parar_spinner())
                     self.after(50, lambda: self.atualizar_progresso(0, "❌ Falhou"))
@@ -802,6 +829,7 @@ class AppMigrador(ctk.CTk):
                 self.after(0, lambda: self.frame_mig_venda.btn.configure(state="normal"))
 
         threading.Thread(target=thread_migracao_venda, daemon=True).start()
+
 
     def executar_truncate(self):
         """Trunca as tabelas relacionadas no MySQL destino."""
@@ -835,7 +863,7 @@ class AppMigrador(ctk.CTk):
             self.log_message(f"❌ Erro ao conectar no MySQL: {msg}")
             return
 
-        tabelas = ["venda", "cliente"]  # Adicionar mais tabelas conforme necessário
+        tabelas = ["item", "venda", "cliente"]  # item antes de venda por FK
 
         try:
             cursor = my.conn.cursor()

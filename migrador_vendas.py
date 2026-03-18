@@ -1,11 +1,18 @@
 import fdb
 from core import ConexaoFirebird, ConexaoMySQL
+from migrador_itens import MigradorItens
 from loguru import logger
 
 
 class MigradorVendas:
     """
-    Migra os registros de PEDIDO (Firebird) para a tabela `venda` (MySQL).
+    Migra os registros de PEDIDO (Firebird) para as tabelas `venda` e `item` (MySQL).
+
+    Abordagem 1-a-1:
+      Para cada pedido Firebird:
+        1. INSERT INTO venda  → captura lastrowid → mapa_idvenda[id_fb] = idvenda_mysql
+        2. INSERT INTO item   → todos os itens daquele pedido, usando o idvenda recém-gerado
+        3. COMMIT             → venda + seus itens são confirmados juntos (atomicidade)
 
     Parâmetros obrigatórios na construção:
       - fb_conn     : ConexaoFirebird
@@ -16,7 +23,6 @@ class MigradorVendas:
 
     Resultado após executar():
       - self.mapa_idvenda: dict { id_pedido_firebird: idvenda_mysql }
-        Esse dicionário será usado nas etapas seguintes (itens e parcelas).
     """
 
     def __init__(
@@ -26,12 +32,15 @@ class MigradorVendas:
         id_loja: int,
         fk_empresa: int,
         log_callback=None,
+        progress_callback=None,
     ):
         self.fb = fb_conn
         self.my = my_conn
         self.id_loja = id_loja
         self.fk_empresa = fk_empresa
         self.log = log_callback if log_callback else print
+        # progress_callback(atual: int, total: int) → atualiza barra na UI
+        self.progress = progress_callback if progress_callback else lambda a, t: None
         # Dicionário id_pedido_fb → idvenda_mysql – preenchido após executar()
         self.mapa_idvenda: dict[int, int] = {}
 
@@ -41,46 +50,68 @@ class MigradorVendas:
 
     def executar(self, truncar: bool = False) -> bool:
         try:
-            self.log("> Iniciando migração de Vendas...")
+            self.log("> Iniciando migração de Vendas + Itens...")
 
-            # 1. Conectar
+            # 1. Conectar Firebird
             sucesso_fb, msg_fb = self.fb.conectar()
             if not sucesso_fb:
                 self.log(f"❌ Erro ao conectar no Firebird: {msg_fb}")
                 return False
 
+            # 2. Conectar MySQL
             sucesso_my, msg_my = self.my.conectar()
             if not sucesso_my:
                 self.log(f"❌ Erro ao conectar no MySQL: {msg_my}")
                 return False
 
-            # 2. Opcional: truncar tabela destino
+            # 3. Opcional: truncar tabelas destino
             if truncar:
-                self.log("> Limpando a tabela 'venda' no MySQL (TRUNCATE)...")
-                cur = self.my.conn.cursor()
-                cur.execute("SET FOREIGN_KEY_CHECKS = 0")
-                cur.execute("TRUNCATE TABLE venda")
-                cur.execute("SET FOREIGN_KEY_CHECKS = 1")
-                self.my.conn.commit()
-                cur.close()
+                self._truncar_tabelas()
 
-            # 3. Criar índices no Firebird (otimização)
+            # 4. Criar índices no Firebird (otimização)
             self._criar_indices_firebird()
 
-            # 4. Extrair dados do Firebird
+            # 5. Extrair cabeçalhos das vendas do Firebird
             self.log(f"> Extraindo vendas do Firebird (empresa {self.fk_empresa})...")
             dados = self._extrair_dados()
             if not dados:
                 self.log("> Nenhuma venda retornada ou erro na extração.")
                 return False
 
-            self.log(f"> Foram encontrados {len(dados)} pedidos.")
+            total = len(dados)
+            self.log(f"> Foram encontrados {total:,} pedidos.")
+            # Sinaliza o total para a UI iniciar modo determinado
+            self.progress(0, total)
 
-            # 5. Inserir no MySQL capturando idvenda gerado
-            self.log("> Salvando vendas no MySQL...")
-            self._salvar_no_mysql(dados)
+            # 6. Instanciar MigradorItens (compartilha conexões, sem abrir novas)
+            migrador_itens = MigradorItens(
+                fb_conn=self.fb,
+                my_conn=self.my,
+                id_loja=self.id_loja,
+                fk_empresa=self.fk_empresa,
+                mapa_idvenda=self.mapa_idvenda,
+                log_callback=self.log,
+            )
 
-            self.log(f"✅ Migração de Vendas concluída! {len(self.mapa_idvenda)} registros mapeados.")
+            # 6b. Pré-carregar TODOS os itens em memória com UMA query Firebird.
+            #     Elimina ~100k round-trips individuais durante o loop de vendas.
+            cur_pre = self.fb.conn.cursor()
+            try:
+                migrador_itens.pre_carregar(cur_pre)
+            finally:
+                cur_pre.close()
+
+            # 7. Loop principal 1-a-1: venda → itens (do cache) → commit em lote
+            self.log("> Salvando vendas e itens no MySQL (1 a 1)...")
+            self._salvar_1a1(dados, migrador_itens, total)
+
+
+            self.log(
+                f"✅ Migração concluída! "
+                f"Vendas: {len(self.mapa_idvenda)} | "
+                f"Itens: {migrador_itens.total_inseridos} | "
+                f"Erros de item: {migrador_itens.total_erros}"
+            )
             return True
 
         except Exception as e:
@@ -90,6 +121,121 @@ class MigradorVendas:
         finally:
             self.fb.desconectar()
             self.my.desconectar()
+
+    # =========================================================================
+    # LOOP 1-A-1
+    # =========================================================================
+
+    # Quantidade de vendas por lote de commit (ajuste conforme RAM/latência).
+    # Maior = menos round-trips, mais dados em risco se cair no meio.
+    BATCH_SIZE = 500
+
+    def _salvar_1a1(self, dados: list[dict], migrador_itens: MigradorItens, total: int):
+        """
+        Para cada pedido em `dados`:
+          1. INSERT na tabela venda → captura lastrowid → atualiza mapa_idvenda
+          2. Chama migrador_itens.inserir_por_venda() com cursores compartilhados
+          3. COMMIT em lote a cada BATCH_SIZE vendas (muito mais rápido que 1 por 1)
+
+        Em caso de erro por venda, o pedido com erro é pulado (sem rollback do lote
+        inteiro), e o lote continua normalmente.
+        """
+        # Colunas da tabela venda no MySQL
+        colunas_venda = [
+            "idloja", "operacao", "romaneio", "idusuario", "idcliente",
+            "datacadastro", "quantidade", "total", "liquido", "parcela",
+            "prazo", "pedido", "status", "idplano", "idvendedor", "obs",
+            "motivo", "quitado", "aberto", "data", "hora", "online",
+            "varejo", "idautorizacao", "idusuarioalteracao", "orderidvtex",
+            "nnf", "idpacking", "created", "updated",
+        ]
+        nomes = ", ".join([f"`{c}`" for c in colunas_venda])
+        placeholders = ", ".join(["%s"] * len(colunas_venda))
+        sql_venda = f"INSERT INTO venda ({nomes}) VALUES ({placeholders})"
+
+        cursor_fb = self.fb.conn.cursor()
+        cursor_my = self.my.conn.cursor()
+
+        erros_venda = 0
+
+        # ── Otimizações de sessão MySQL ──────────────────────────────
+        # Desabilitar verificações desnecessárias durante bulk insert.
+        # São restauradas no bloco finally.
+        try:
+            cursor_my.execute("SET unique_checks = 0")
+            cursor_my.execute("SET foreign_key_checks = 0")
+            self.log("  > Otimizações de sessão MySQL ativadas.")
+        except Exception as e:
+            self.log(f"  ⚠️ Não foi possível otimizar sessão MySQL: {e}")
+
+        try:
+            for idx, linha in enumerate(dados, start=1):
+                id_fb = linha["id_pedido_fb"]
+                valores_venda = self._montar_valores_venda(linha, colunas_venda)
+
+                try:
+                    # ── INSERT venda ──────────────────────────────────
+                    cursor_my.execute(sql_venda, valores_venda)
+                    idvenda_mysql = cursor_my.lastrowid
+                    self.mapa_idvenda[id_fb] = idvenda_mysql
+
+                    # ── INSERT itens (mesmo cursor, mesma transação) ──
+                    migrador_itens.inserir_por_venda(id_fb, cursor_fb, cursor_my)
+
+                except Exception as e:
+                    erros_venda += 1
+                    self.log(f"  ⚠️ Erro ao processar pedido FB {id_fb}: {e}")
+                    logger.error(f"Erro no pedido {id_fb}: {e}")
+
+                # ── COMMIT em lote ────────────────────────────────────
+                if idx % self.BATCH_SIZE == 0 or idx == total:
+                    try:
+                        self.my.conn.commit()
+                    except Exception as e:
+                        self.log(f"  ❌ Erro no commit do lote (vendas {idx - self.BATCH_SIZE + 1}–{idx}): {e}")
+                        logger.error(f"Erro no commit do lote: {e}")
+                        self.my.conn.rollback()
+
+                    self.log(f"  > [{idx:,}/{total:,}] Vendas processadas (lote commitado)...")
+                    self.progress(idx, total)
+
+
+        finally:
+            # Restaurar configurações de sessão MySQL
+            try:
+                cursor_my.execute("SET unique_checks = 1")
+                cursor_my.execute("SET foreign_key_checks = 1")
+                self.my.conn.commit()
+            except Exception:
+                pass
+            cursor_fb.close()
+            cursor_my.close()
+
+        self.log(
+            f"  > Vendas inseridas: {len(self.mapa_idvenda)} | "
+            f"Erros de venda: {erros_venda}"
+        )
+
+    # =========================================================================
+    # TRUNCATE
+    # =========================================================================
+
+    def _truncar_tabelas(self):
+        """Trunca item antes de venda (FK), depois venda."""
+        self.log("> Limpando tabelas 'item' e 'venda' no MySQL (TRUNCATE)...")
+        cur = self.my.conn.cursor()
+        try:
+            cur.execute("SET FOREIGN_KEY_CHECKS = 0")
+            cur.execute("TRUNCATE TABLE item")
+            cur.execute("TRUNCATE TABLE venda")
+            cur.execute("SET FOREIGN_KEY_CHECKS = 1")
+            self.my.conn.commit()
+            self.log("  > Tabelas truncadas com sucesso.")
+        except Exception as e:
+            self.log(f"  ⚠️ Erro no truncate: {e}")
+            raise
+        finally:
+            cur.close()
 
     # =========================================================================
     # ÍNDICES FIREBIRD
@@ -109,6 +255,8 @@ class MigradorVendas:
             "CREATE INDEX IDX_NF_PEDIDO       ON NOTA_FISCAL (FK_PEDIDO);",
             "CREATE INDEX IDX_CONTA_PEDIDO    ON CONTA (FK_PEDIDO);",
             "CREATE INDEX IDX_CPARCELA_CONTA  ON CONTA_PARCELA (FK_CONTA);",
+            # Usado no JOIN da query de itens: PRODUTO_CODIGO_BARRA.FK_PRODUTO
+            "CREATE INDEX IDX_PCB_PRODUTO     ON PRODUTO_CODIGO_BARRA (FK_PRODUTO);",
         ]
         cur = self.fb.conn.cursor()
         for sql in indices_sql:
@@ -124,24 +272,20 @@ class MigradorVendas:
         cur.close()
 
     # =========================================================================
-    # EXTRAÇÃO FIREBIRD
+    # EXTRAÇÃO FIREBIRD – CABEÇALHOS DE VENDA
     # =========================================================================
 
     def _extrair_dados(self) -> list[dict]:
         """
-        Executa o SELECT de vendas no Firebird.
-        Retorna lista de dicionários, cada chave corresponde a uma coluna
-        (EXCETO idvenda/idloja que serão gerados/injetados no MySQL).
-
-        Coluna extra incluída:
-          _id_pedido_fb  →  V.ID original do Firebird (usado para o mapa).
+        Executa o SELECT de cabeçalhos de venda no Firebird.
+        Retorna lista de dicionários com as colunas do SELECT + id_pedido_fb.
         """
         query = f"""
         SELECT
             CASE
-		        WHEN V.FK_TIPO_PEDIDO = 1 THEN 'V' -- VENDA
-		        WHEN V.FK_TIPO_PEDIDO = 5 THEN 'D' -- DEVOLUÇÃO DE VENDA
-	        END AS operacao,
+                WHEN V.FK_TIPO_PEDIDO = 1 THEN 'V'
+                WHEN V.FK_TIPO_PEDIDO = 5 THEN 'D'
+            END AS operacao,
             ROW_NUMBER() OVER(PARTITION BY V.DATA_EMISSAO
                               ORDER BY V.DATA_HORA_ABERTURA)       AS romaneio,
             CASE
@@ -214,7 +358,12 @@ class MigradorVendas:
         FROM PEDIDO V
             LEFT JOIN CADASTRO CCLI  ON CCLI.ID  = V.FK_CADASTRO
             LEFT JOIN CADASTRO CVEND ON CVEND.ID = V.FK_VENDEDOR
-            LEFT JOIN NOTA_FISCAL NF ON NF.FK_PEDIDO = V.ID
+            LEFT JOIN (
+                -- Agrupado para evitar duplicatas quando há > 1 NF por pedido
+                SELECT FK_PEDIDO, MIN(NRO_NOTA) AS NRO_NOTA
+                FROM NOTA_FISCAL
+                GROUP BY FK_PEDIDO
+            ) NF ON NF.FK_PEDIDO = V.ID
             LEFT JOIN (
                 SELECT FK_PEDIDO, SUM(QUANTIDADE) AS QUANTIDADE
                 FROM PEDIDO_ITEM
@@ -242,7 +391,7 @@ class MigradorVendas:
             LEFT JOIN SYS_USUARIO SU   ON SU.ID  = V.FK_USUARIO_PED
             LEFT JOIN TIPO_PAGAMENTO TP ON TP.ID = CI.IDPLANO
             LEFT JOIN CARTAO C          ON C.ID  = CI.FK_CARTAO
-        WHERE V.FK_TIPO_PEDIDO = '1' OR V.FK_TIPO_PEDIDO = '5'
+        WHERE (V.FK_TIPO_PEDIDO = '1' OR V.FK_TIPO_PEDIDO = '5')
           AND V.FK_EMPRESA = {self.fk_empresa}
         """
 
@@ -259,61 +408,12 @@ class MigradorVendas:
         return resultados
 
     # =========================================================================
-    # INSERÇÃO MYSQL
+    # MONTAGEM DE VALORES – VENDA
     # =========================================================================
 
-    def _salvar_no_mysql(self, dados: list[dict]):
+    def _montar_valores_venda(self, linha: dict, colunas: list) -> tuple:
         """
-        Insere cada venda individualmente para capturar o LAST_INSERT_ID()
-        gerado pelo autoincremento do MySQL.
-        Preenche self.mapa_idvenda { id_pedido_fb: idvenda_mysql }.
-        """
-        cursor = self.my.conn.cursor()
-
-        # Colunas que vão para o MySQL (excluir campo auxiliar)
-        # Colunas do MySQL (exclui id_pedido_fb que é auxiliar)
-        colunas_mysql = [
-            "idloja", "operacao", "romaneio", "idusuario", "idcliente",
-            "datacadastro", "quantidade", "total", "liquido", "parcela",
-            "prazo", "pedido", "status", "idplano", "idvendedor", "obs",
-            "motivo", "quitado", "aberto", "data", "hora", "online",
-            "varejo", "idautorizacao", "idusuarioalteracao", "orderidvtex",
-            "nnf", "idpacking", "created", "updated",
-        ]
-
-        nomes = ", ".join([f"`{c}`" for c in colunas_mysql])
-        placeholders = ", ".join(["%s"] * len(colunas_mysql))
-        sql_insert = f"INSERT INTO venda ({nomes}) VALUES ({placeholders})"
-
-        erros = 0
-        for linha in dados:
-            id_fb = linha["id_pedido_fb"]
-
-            valores = self._montar_valores(linha, colunas_mysql)
-
-            try:
-                cursor.execute(sql_insert, valores)
-                idvenda_mysql = cursor.lastrowid
-                self.mapa_idvenda[id_fb] = idvenda_mysql
-            except Exception as e:
-                erros += 1
-                self.log(f"  ⚠️ Erro ao inserir pedido FB {id_fb}: {e}")
-                logger.error(f"Erro ao inserir pedido {id_fb}: {e}")
-
-        try:
-            self.my.conn.commit()
-        except Exception as e:
-            self.my.conn.rollback()
-            self.log(f"  ❌ Erro no commit das vendas: {e}")
-            raise
-        finally:
-            cursor.close()
-
-        self.log(f"  > Inseridos: {len(self.mapa_idvenda)} | Erros: {erros}")
-
-    def _montar_valores(self, linha: dict, colunas: list) -> tuple:
-        """
-        Monta a tupla de valores na ordem das colunas MySQL.
+        Monta a tupla de valores na ordem das colunas MySQL da tabela venda.
         Injeta idloja (não vem do Firebird).
         """
         valores = []
