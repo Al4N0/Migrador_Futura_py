@@ -2,52 +2,102 @@
 Migrador de Dados de Sistemas Delphi (Firebird) para Aplicação Web (MySQL/Python).
 
 ## Visão Geral
-Este é um aplicativo de conversão e extração de dados `Desktop > Web`, criado em Python utilizando `CustomTkinter` para apresentar uma interface premium inspirada em layouts Delphi robustos. Ele se conecta via Driver Nativo em bases de dados locais legadas (`.fdb` - Firebird) e transporta massas de dados de forma automatizada para um banco de dados destino Moderno (`MySQL 8`).
+Aplicativo de conversão e extração de dados `Desktop > Web`, criado em Python com `CustomTkinter`. Conecta-se via Driver Nativo em bases de dados locais legadas (`.fdb` - Firebird) e transporta massas de dados de forma automatizada para um banco de dados moderno (`MySQL 8`).
+
+---
 
 ## Interface e Design 🎨
-A interface foi redesenhada para oferecer uma experiência de usuário profissional e funcional:
-* **Sidebar Escura (Estilo ERP)**: Painel lateral focado em ações e parâmetros de controle.
-* **Componentes Premium**: Uso de cores harmoniosas (`#2B2B40`), cantos arredondados e tipografia clara para redução de fadiga visual.
-* **Feedback Interativo**: 
-    - **Spinner de Animação**: Indicador visual (⠋⠙⠹) que mostra que o banco de dados está processando.
-    - **Progresso Dinâmico**: Barra de status que alterna entre modo indeterminado (durante extração) e percentual (durante gravação).
+* **Sidebar Escura (Estilo ERP)**: Painel lateral com parâmetros de controle e ações de migração.
+* **Componentes Premium**: Paleta de cores harmoniosa, cantos arredondados e tipografia clara.
+* **Feedback Interativo**:
+  - **Spinner de Animação** (⠋⠙⠹): Indicador visual durante processamento.
+  - **Barra de Progresso Dinâmica**: Modo indeterminado na extração e percentual na gravação.
 
-## Funcionalidades Principais 🌟
-* **ID Loja Obrigatório**: Garantia de integridade dos dados através da validação mandatória do número da loja antes de qualquer operação.
-* **Módulos de Migração Segregados**: Migração de Clientes (funcional), Produtos e Vendas (em desenvolvimento).
-* **Parâmetros de Truncate**: Opção para limpar as tabelas de destino individualmente ou via botão global.
-* **Auto-Save via `.env`**: Configurações de conexão são salvas automaticamente após testes bem-sucedidos.
-* **Conectividade Docker-Ready**: Configuração otimizada para bancos Firebird rodando em containers Docker ou instalações locais.
+---
+
+## Funcionalidades 🌟
+
+### Parâmetros Globais (Sidebar)
+| Campo | Descrição |
+|---|---|
+| 🏪 **ID Loja** | Identificador numérico da loja destino — obrigatório para todas as migrações |
+| 🏢 **Empresa (Firebird)** | Seletor dinâmico populado automaticamente ao testar as conexões. Exibe `ID \| Razão Social` após seleção e detalhes completos (CNPJ + Qtd Vendas) ao abrir o dropdown |
+| ⚙️ **Configurar Bancos** | Abre janela modal para configurar Firebird e MySQL, com botão de teste |
+
+### Módulos de Migração
+| Botão | Tabela Destino | Status |
+|---|---|---|
+| 👥 **Migrar Cliente** | `cliente` | ✅ Funcional |
+| 🛒 **Migrar Venda** | `venda` | ✅ Funcional |
+| ❌ **Truncate** | Todas as tabelas mapeadas | ✅ Funcional |
+
+Cada módulo possui checkbox **"Truncar antes"** para limpar a tabela destino antes de inserir.
+
+### Log em Arquivo
+Cada migração gera automaticamente um arquivo de log em `logs/`:
+- `logs/clientes.log` — log da última migração de clientes
+- `logs/vendas.log` — log da última migração de vendas
+
+Todos os eventos (início, progresso, erros, conclusão) são gravados com timestamp `[HH:MM:SS]`.
+
+### Seleção de Empresa (Migração de Vendas)
+Ao testar as conexões com sucesso, o sistema consulta automaticamente o Firebird e lista todas as empresas (`CHK_EMPRESA = 'S'`) com suas respectivas quantidades de vendas. O filtro `FK_EMPRESA` é aplicado no SELECT do Firebird.
+
+---
+
+## Arquitetura dos Arquivos
+```
+Migrador_Futura_py/
+├── main.py               # Interface principal (CustomTkinter)
+├── core.py               # Classes de conexão Firebird e MySQL
+├── migrador_clientes.py  # Módulo de migração de clientes
+├── migrador_vendas.py    # Módulo de migração de vendas (cabeçalho)
+├── requirements.txt      # Dependências Python
+├── .env                  # Credenciais (ignorado pelo Git)
+└── logs/                 # Logs de migração (ignorado pelo Git)
+```
+
+---
 
 ## Requisitos de Sistema 🛠️
 - **Windows**: Recomendado para compatibilidade total com diálogos nativos.
-- **Python 3.10+**: Necessário para execução do interpretador.
-- **Firebird Client**: Certifique-se de ter a `fbclient.dll` acessível (geralmente instalada com o servidor ou client do Firebird).
+- **Python 3.10+**: Obrigatório (uso de type hints modernos e `match`).
+- **Firebird Client**: `fbclient.dll` acessível no sistema.
+
+---
 
 ## Instalação e Execução
 
-1. Baixe o repositório ou faça o clone:
 ```bash
+# 1. Clone o repositório
 git clone <URL_DO_REPOSITORIO>
-```
-2. Instale as dependências:
-```bash
+
+# 2. Crie e ative o ambiente virtual
 python -m venv venv
 venv\Scripts\activate
-pip install -r requirements.txt
-```
-*(Dependências principais: `fdb`, `mysql-connector-python`, `customtkinter`, `python-dotenv`, `loguru`)*
 
-3. Inicie a Interface Principal:
-```bash
+# 3. Instale as dependências
+pip install -r requirements.txt
+
+# 4. Inicie a aplicação
 python main.py
 ```
 
-## Como Usar o Migrador
-1. **Configuração**: Clique no botão **⚙️ Configurar Bancos** na sidebar. Informe os dados de conexão e clique em **Testar**. Se aprovado, os botões de migração serão liberados.
-2. **ID Loja**: Preencha obrigatoriamente o campo **Nº da Loja** no topo da sidebar.
-3. **Migração**: Selecione se deseja "Truncar antes" e clique no botão da entidade (ex: **👥 Migrar Cliente**). 
-4. **Logs**: Acompanhe o processamento em tempo real no painel de log à direita.
+*Dependências principais: `fdb`, `mysql-connector-python`, `customtkinter`, `python-dotenv`, `loguru`*
+
+---
+
+## Como Usar
+
+1. **Configurar**: Clique em **⚙️ Configurar Bancos**, preencha as conexões e clique em **Testar Conexões**. As empresas do Firebird serão carregadas automaticamente no seletor.
+2. **ID Loja**: Preencha o campo **🏪 ID Loja** (obrigatório).
+3. **Empresa**: Selecione a empresa do Firebird no dropdown **🏢 Empresa**.
+4. **Migrar**: Marque "Truncar antes" se necessário e clique no módulo desejado.
+5. **Logs**: Acompanhe em tempo real no painel à direita. O arquivo de log é salvo automaticamente em `logs/`.
+
+---
 
 ## Segurança 🔒
-Credenciais sensíveis são armazenadas localmente no arquivo `.env`, que é ignorado pelo Git através do `.gitignore`. Nunca compartilhe seu arquivo `.env` publicamente.
+- Credenciais armazenadas **localmente** em `.env` — nunca versionadas.
+- Pasta `logs/` ignorada pelo Git.
+- Nunca compartilhe seu arquivo `.env` publicamente.

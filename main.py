@@ -1,4 +1,5 @@
 import os
+import datetime
 import customtkinter as ctk
 from dotenv import load_dotenv, set_key
 from tkinter import messagebox
@@ -7,6 +8,7 @@ import threading
 # Importar nossas classes de banco de dados
 from core import ConexaoFirebird, ConexaoMySQL
 from migrador_clientes import MigradorClientes
+from migrador_vendas import MigradorVendas
 
 # Carrega as variáveis de ambiente do arquivo .env
 load_dotenv()
@@ -222,6 +224,10 @@ class JanelaConfiguracoes(ctk.CTkToplevel):
         # Habilita os botões de migração
         self.parent.conexoes_ok = True
         self.parent.atualizar_estado_botoes()
+        # Carrega as empresas do Firebird no seletor
+        self.parent.carregar_empresas_firebird(
+            path_fb, user_fb, pass_fb, host_fb, port_fb_int
+        )
         self.destroy()
 
 
@@ -250,6 +256,7 @@ class AppMigrador(ctk.CTk):
         # Estado interno
         self.conexoes_ok = False
         self.id_loja = None  # Em memória, nunca salvo no .env
+        self._log_file = None  # Handle do arquivo de log ativo
 
         # Spinner / animação de loading
         self._spinner_ativo = False
@@ -284,9 +291,9 @@ class AppMigrador(ctk.CTk):
         self.frame_sidebar.grid(row=1, column=0, sticky="nsew")
         self.frame_sidebar.grid_propagate(False)
 
-        # ── ID Loja ──────────────────────────────────────────────
+        # ── ID Loja ────────────────────────────────────────────
         self.frame_idloja = ctk.CTkFrame(self.frame_sidebar, fg_color=COR_CARD, corner_radius=10)
-        self.frame_idloja.pack(fill="x", padx=12, pady=(15, 8))
+        self.frame_idloja.pack(fill="x", padx=12, pady=(15, 4))
 
         lbl_idloja_icon = ctk.CTkLabel(
             self.frame_idloja, text="🏪  ID Loja",
@@ -302,7 +309,37 @@ class AppMigrador(ctk.CTk):
         )
         self.entry_idloja.pack(fill="x", padx=12, pady=(2, 10))
 
-        # ── Botão Configurar ─────────────────────────────────────
+        # ── Seletor de Empresa (populado após testar conexão) ──────────
+        self.frame_idempresa = ctk.CTkFrame(self.frame_sidebar, fg_color=COR_CARD, corner_radius=10)
+        self.frame_idempresa.pack(fill="x", padx=12, pady=(0, 8))
+
+        lbl_empresa = ctk.CTkLabel(
+            self.frame_idempresa, text="🏢  Empresa (Firebird)",
+            font=("", 13, "bold"), text_color=COR_TEXTO, anchor="w"
+        )
+        lbl_empresa.pack(fill="x", padx=12, pady=(8, 2))
+
+        # Dicionário: label-2-linhas → C.ID | label-2-linhas → label-1-linha
+        self._empresas_map: dict[str, int] = {}
+        self._empresas_short: dict[str, str] = {}
+        self._empresa_selecionada_id: int | None = None
+
+        self.opt_empresa = ctk.CTkOptionMenu(
+            self.frame_idempresa,
+            values=["(Configure os bancos primeiro)"],
+            height=52,
+            fg_color=COR_FUNDO_PRINCIPAL,
+            button_color=COR_ACCENT,
+            button_hover_color=COR_CONFIG,
+            text_color=COR_TEXTO,
+            font=("", 11),
+            corner_radius=8,
+            state="disabled",
+            command=self._ao_selecionar_empresa,
+        )
+        self.opt_empresa.pack(fill="x", padx=12, pady=(2, 10))
+
+        # ── Botão Configurar ──────────────────────────────────────
         self.btn_config = ctk.CTkButton(
             self.frame_sidebar, text="⚙️  Configurar Bancos",
             font=("", 13, "bold"), height=40,
@@ -326,6 +363,17 @@ class AppMigrador(ctk.CTk):
         # ── Separador ────────────────────────────────────────────
         sep2 = ctk.CTkFrame(self.frame_sidebar, fg_color=COR_CARD, height=2)
         sep2.pack(fill="x", padx=20, pady=10)
+
+        # ── Botão Migrar Venda ───────────────────────────────────
+        self.frame_mig_venda = self._criar_botao_migracao(
+            emoji="🛒", titulo="Migrar Venda",
+            cor_btn=COR_SUCCESS, cor_hover=COR_SUCCESS_HOVER,
+            comando=self.iniciar_migracao_vendas
+        )
+
+        # ── Separador ────────────────────────────────────────────
+        sep3 = ctk.CTkFrame(self.frame_sidebar, fg_color=COR_CARD, height=2)
+        sep3.pack(fill="x", padx=20, pady=10)
 
         # ── Botão Truncate ───────────────────────────────────────
         self.btn_truncate = ctk.CTkButton(
@@ -443,7 +491,84 @@ class AppMigrador(ctk.CTk):
         """Habilita/desabilita botões de migração conforme o estado."""
         estado = "normal" if self.conexoes_ok else "disabled"
         self.frame_mig_cliente.btn.configure(state=estado)
+        self.frame_mig_venda.btn.configure(state=estado)
         self.btn_truncate.configure(state=estado)
+
+    def _ao_selecionar_empresa(self, label_2linhas: str):
+        """Callback do OptionMenu: troca exibição para 1 linha e guarda o C.ID."""
+        self._empresa_selecionada_id = self._empresas_map.get(label_2linhas)
+        short = self._empresas_short.get(label_2linhas, label_2linhas)
+        # Atualiza o texto exibido sem alterar os values internos
+        self.opt_empresa.set(short)
+        self.opt_empresa.configure(height=32)
+
+    def carregar_empresas_firebird(self, path_fb, user_fb, pass_fb, host_fb, port_fb):
+        """Consulta o Firebird para listar empresas e popula o OptionMenu."""
+        import threading
+
+        def _carregar():
+            try:
+                fb = ConexaoFirebird(path_fb, user_fb, pass_fb, host_fb, port_fb)
+                sucesso, msg = fb.conectar()
+                if not sucesso:
+                    self.log_message(f"⚠️ Não foi possível carregar empresas: {msg}")
+                    return
+
+                query = """
+                    SELECT
+                        C.ID,
+                        C.CNPJ_CPF,
+                        C.RAZAO_SOCIAL,
+                        COALESCE(P.QUANTIDADE_VENDA, 0) AS QUANTIDADE_VENDA
+                    FROM CADASTRO C
+                    LEFT JOIN (
+                        SELECT FK_EMPRESA, COUNT(ID) AS QUANTIDADE_VENDA
+                        FROM PEDIDO
+                        WHERE FK_TIPO_PEDIDO = 1
+                        GROUP BY FK_EMPRESA
+                    ) P ON P.FK_EMPRESA = C.ID
+                    WHERE C.CHK_EMPRESA = 'S'
+                """
+                cur = fb.conn.cursor()
+                cur.execute(query)
+                rows = cur.fetchall()
+                cur.close()
+                fb.desconectar()
+
+                self._empresas_map.clear()
+                self._empresas_short.clear()
+                self._empresa_selecionada_id = None
+                opcoes = []
+                for row in rows:
+                    cid, cnpj, razao, qtd = row
+                    cnpj_fmt = (cnpj or "").strip() or "(sem CNPJ/CPF)"
+                    razao_fmt = (razao or "").strip()[:26]
+                    label_2 = f"ID: {cid}  |  {razao_fmt}\n{cnpj_fmt}  |  {qtd} vendas"
+                    label_1 = f"ID: {cid}  |  {razao_fmt}"
+                    self._empresas_map[label_2] = int(cid)
+                    self._empresas_short[label_2] = label_1
+                    opcoes.append(label_2)
+
+                if not opcoes:
+                    opcoes = ["(Nenhuma empresa encontrada)"]
+
+                # Atualizar na thread principal
+                def _atualizar_ui():
+                    self.opt_empresa.configure(values=opcoes, state="normal", height=52)
+                    # Pré-seleciona a primeira opção
+                    primeiro_label_2 = opcoes[0]
+                    primeiro_label_1 = self._empresas_short.get(primeiro_label_2, primeiro_label_2)
+                    self._empresa_selecionada_id = self._empresas_map.get(primeiro_label_2)
+                    self.opt_empresa.set(primeiro_label_1)
+                    self.opt_empresa.configure(height=32)
+                    self.log_message(f"🏢 {len(self._empresas_map)} empresa(s) carregada(s) no seletor.")
+
+                self.after(0, _atualizar_ui)
+
+            except Exception as e:
+                self.log_message(f"⚠️ Erro ao carregar empresas: {e}")
+
+        threading.Thread(target=_carregar, daemon=True).start()
 
     def validar_id_loja(self):
         """Valida se o ID Loja foi informado. Retorna o valor ou None."""
@@ -471,8 +596,37 @@ class AppMigrador(ctk.CTk):
         return self.id_loja
 
     def log_message(self, mensagem):
+        """Exibe mensagem na UI e grava no arquivo de log ativo (se houver)."""
         self.txt_log.insert("end", mensagem + "\n")
         self.txt_log.see("end")
+        if self._log_file:
+            try:
+                ts = datetime.datetime.now().strftime("%H:%M:%S")
+                self._log_file.write(f"[{ts}] {mensagem}\n")
+                self._log_file.flush()
+            except Exception:
+                pass
+
+    def _abrir_log_arquivo(self, tipo: str) -> str:
+        """Cria pasta logs/ e abre um novo arquivo de log para a migração."""
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        logs_dir = os.path.join(base_dir, "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        caminho = os.path.join(logs_dir, f"{tipo}.log")
+        self._log_file = open(caminho, "w", encoding="utf-8")
+        self._log_file.write(f"=== Log de Migração [{tipo.upper()}] - {datetime.datetime.now()} ===\n\n")
+        return caminho
+
+    def _fechar_log_arquivo(self):
+        """Fecha e descarta o handle do arquivo de log atual."""
+        if self._log_file:
+            try:
+                self._log_file.write("\n=== Fim do log ===\n")
+                self._log_file.close()
+            except Exception:
+                pass
+            finally:
+                self._log_file = None
 
     def atualizar_progresso(self, valor, texto=None):
         """Atualiza barra de progresso (0.0 a 1.0) e label de percentual."""
@@ -553,6 +707,8 @@ class AppMigrador(ctk.CTk):
         truncar_antes = self.frame_mig_cliente.chk_var.get()
 
         def thread_migracao():
+            caminho_log = self._abrir_log_arquivo("clientes")
+            self.log_message(f"📄 Log salvo em: {caminho_log}")
             try:
                 sucesso = migrador.executar(truncar=truncar_antes)
                 if sucesso:
@@ -563,10 +719,89 @@ class AppMigrador(ctk.CTk):
                     self.after(0, lambda: self.parar_spinner())
                     self.after(50, lambda: self.atualizar_progresso(0, "❌ Falhou"))
                     self.log_message("❌ Migração de Clientes falhou.")
+            except Exception as e:
+                self.log_message(f"❌ Erro inesperado: {e}")
             finally:
+                self._fechar_log_arquivo()
                 self.after(0, lambda: self.frame_mig_cliente.btn.configure(state="normal"))
 
         threading.Thread(target=thread_migracao, daemon=True).start()
+
+    def validar_id_empresa(self):
+        """Retorna o C.ID da empresa selecionada no OptionMenu, ou None."""
+        fk = self._empresa_selecionada_id
+        if not fk:
+            messagebox.showwarning(
+                "Empresa não selecionada",
+                "Por favor, configure os bancos e selecione uma Empresa antes de migrar vendas.\n\n"
+                "Clique em '⚙️ Configurar Bancos' e teste as conexões para carregar a lista.",
+                parent=self
+            )
+            return None
+        return fk
+
+    def iniciar_migracao_vendas(self):
+        # Validar ID Loja
+        id_loja = self.validar_id_loja()
+        if id_loja is None:
+            return
+
+        # Validar ID Empresa
+        fk_empresa = self.validar_id_empresa()
+        if fk_empresa is None:
+            return
+
+        self.log_message("\n🛒 ===============================================")
+        self.log_message(f"🛒 [Iniciando] Migração de Vendas (Loja: {id_loja} | Empresa FB: {fk_empresa})")
+        self.log_message("🛒 ===============================================")
+        self.frame_mig_venda.btn.configure(state="disabled")
+        self.iniciar_spinner("Migrando Vendas...")
+
+        load_dotenv(override=True)
+        path_fb = os.getenv("FB_PATH")
+        user_fb = os.getenv("FB_USER")
+        pass_fb = os.getenv("FB_PASS")
+        host_fb = os.getenv("FB_HOST", "localhost")
+        port_fb = int(os.getenv("FB_PORT", 3050))
+
+        host_my = os.getenv("MYSQL_HOST")
+        user_my = os.getenv("MYSQL_USER")
+        pass_my = os.getenv("MYSQL_PASS")
+        db_my   = os.getenv("MYSQL_DB")
+
+        fb = ConexaoFirebird(path_fb, user_fb, pass_fb, host_fb, port_fb)
+        my = ConexaoMySQL(host_my, user_my, pass_my, db_my)
+
+        migrador = MigradorVendas(
+            fb_conn=fb,
+            my_conn=my,
+            id_loja=id_loja,
+            fk_empresa=fk_empresa,
+            log_callback=self.log_message,
+        )
+
+        truncar_antes = self.frame_mig_venda.chk_var.get()
+
+        def thread_migracao_venda():
+            caminho_log = self._abrir_log_arquivo("vendas")
+            self.log_message(f"📄 Log salvo em: {caminho_log}")
+            try:
+                sucesso = migrador.executar(truncar=truncar_antes)
+                if sucesso:
+                    self.after(0, lambda: self.parar_spinner())
+                    self.after(50, lambda: self.atualizar_progresso(1.0, "✅ Concluído!"))
+                    self.log_message(f"✅ Migração de Vendas concluída. {len(migrador.mapa_idvenda)} vendas migradas.")
+                else:
+                    self.after(0, lambda: self.parar_spinner())
+                    self.after(50, lambda: self.atualizar_progresso(0, "❌ Falhou"))
+                    self.log_message("❌ Migração de Vendas falhou.")
+            except Exception as e:
+                self.log_message(f"❌ Erro inesperado: {e}")
+            finally:
+                self._fechar_log_arquivo()
+                self.after(0, lambda: self.frame_mig_venda.btn.configure(state="normal"))
+
+        threading.Thread(target=thread_migracao_venda, daemon=True).start()
 
     def executar_truncate(self):
         """Trunca as tabelas relacionadas no MySQL destino."""
@@ -600,7 +835,7 @@ class AppMigrador(ctk.CTk):
             self.log_message(f"❌ Erro ao conectar no MySQL: {msg}")
             return
 
-        tabelas = ["cliente"]  # Adicionar mais tabelas conforme necessário
+        tabelas = ["venda", "cliente"]  # Adicionar mais tabelas conforme necessário
 
         try:
             cursor = my.conn.cursor()
