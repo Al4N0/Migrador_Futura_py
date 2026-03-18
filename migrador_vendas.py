@@ -138,7 +138,10 @@ class MigradorVendas:
         """
         query = f"""
         SELECT
-            'V'                                                    AS operacao,
+            CASE
+		        WHEN V.FK_TIPO_PEDIDO = 1 THEN 'V' -- VENDA
+		        WHEN V.FK_TIPO_PEDIDO = 5 THEN 'D' -- DEVOLUÇÃO DE VENDA
+	        END AS operacao,
             ROW_NUMBER() OVER(PARTITION BY V.DATA_EMISSAO
                               ORDER BY V.DATA_HORA_ABERTURA)       AS romaneio,
             CASE
@@ -239,7 +242,7 @@ class MigradorVendas:
             LEFT JOIN SYS_USUARIO SU   ON SU.ID  = V.FK_USUARIO_PED
             LEFT JOIN TIPO_PAGAMENTO TP ON TP.ID = CI.IDPLANO
             LEFT JOIN CARTAO C          ON C.ID  = CI.FK_CARTAO
-        WHERE V.FK_TIPO_PEDIDO = '1'
+        WHERE V.FK_TIPO_PEDIDO = '1' OR V.FK_TIPO_PEDIDO = '5'
           AND V.FK_EMPRESA = {self.fk_empresa}
         """
 

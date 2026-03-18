@@ -524,7 +524,7 @@ class AppMigrador(ctk.CTk):
                     LEFT JOIN (
                         SELECT FK_EMPRESA, COUNT(ID) AS QUANTIDADE_VENDA
                         FROM PEDIDO
-                        WHERE FK_TIPO_PEDIDO = 1
+                        WHERE FK_TIPO_PEDIDO = 1 OR FK_TIPO_PEDIDO = 5
                         GROUP BY FK_EMPRESA
                     ) P ON P.FK_EMPRESA = C.ID
                     WHERE C.CHK_EMPRESA = 'S'
