@@ -2,6 +2,8 @@ import fdb
 from core import ConexaoFirebird, ConexaoMySQL
 from migrador_itens import MigradorItens
 from loguru import logger
+import json
+import os
 
 
 class MigradorVendas:
@@ -43,6 +45,8 @@ class MigradorVendas:
         self.progress = progress_callback if progress_callback else lambda a, t: None
         # Dicionário id_pedido_fb → idvenda_mysql – preenchido após executar()
         self.mapa_idvenda: dict[int, int] = {}
+        # Mapeamento de planos (carregado em executar)
+        self._mapping_pagamento: dict[str, int] = {}
 
     # =========================================================================
     # PONTO DE ENTRADA PÚBLICO
@@ -63,6 +67,9 @@ class MigradorVendas:
             if not sucesso_my:
                 self.log(f"❌ Erro ao conectar no MySQL: {msg_my}")
                 return False
+
+            # 3. Carregar mapeamento de pagamento (JSON)
+            self._carregar_mapeamento_pagamento()
 
             # 3. Opcional: truncar tabelas destino
             if truncar:
@@ -100,6 +107,9 @@ class MigradorVendas:
                 migrador_itens.pre_carregar(cur_pre)
             finally:
                 cur_pre.close()
+
+            # 6c. Aplicar mapeamento de idplano nos dados carregados
+            self._aplicar_mapeamento_pagamento(dados)
 
             # 7. Loop principal 1-a-1: venda → itens (do cache) → commit em lote
             self.log("> Salvando vendas e itens no MySQL (1 a 1)...")
@@ -143,7 +153,7 @@ class MigradorVendas:
         # Colunas da tabela venda no MySQL
         colunas_venda = [
             "idloja", "operacao", "romaneio", "idusuario", "idcliente",
-            "datacadastro", "quantidade", "total", "liquido", "parcela",
+            "datacadastro", "quantidade", "devolucao", "total", "liquido", "parcela",
             "prazo", "pedido", "status", "idplano", "idvendedor", "obs",
             "motivo", "quitado", "aberto", "data", "hora", "online",
             "varejo", "idautorizacao", "idusuarioalteracao", "orderidvtex",
@@ -283,8 +293,8 @@ class MigradorVendas:
         query = f"""
         SELECT
             CASE
-                WHEN V.FK_TIPO_PEDIDO = 1 THEN 'V'
-                WHEN V.FK_TIPO_PEDIDO = 5 THEN 'D'
+                WHEN V.FK_TIPO_PEDIDO = '1' THEN 'V'
+                WHEN V.FK_TIPO_PEDIDO = '5' THEN 'D'
             END AS operacao,
             ROW_NUMBER() OVER(PARTITION BY V.DATA_EMISSAO
                               ORDER BY V.DATA_HORA_ABERTURA)       AS romaneio,
@@ -299,9 +309,22 @@ class MigradorVendas:
                 ELSE CAST(CCLI.ID AS VARCHAR(14))
             END                                                    AS idcliente,
             V.DATA_EMISSAO                                         AS datacadastro,
-            T.QUANTIDADE                                           AS quantidade,
-            V.TOTAL_PRODUTO                                        AS total,
-            V.TOTAL_PEDIDO                                         AS liquido,
+            CASE
+                WHEN V.FK_TIPO_PEDIDO = '1' THEN T.QUANTIDADE 
+                ELSE 0
+            END                                          AS quantidade,
+            CASE
+                WHEN V.FK_TIPO_PEDIDO = '5' THEN T.QUANTIDADE 
+                ELSE 0
+            END                                          AS devolucao,
+            CASE
+                WHEN V.FK_TIPO_PEDIDO = '1' THEN V.TOTAL_PRODUTO
+                WHEN V.FK_TIPO_PEDIDO = '5' THEN -V.TOTAL_PRODUTO             
+            END                                                 AS total,
+            CASE
+                WHEN V.FK_TIPO_PEDIDO = '1' THEN V.TOTAL_PEDIDO
+                WHEN V.FK_TIPO_PEDIDO = '5' THEN -V.TOTAL_PEDIDO               
+            END                                                 AS liquido,
             CASE
                 WHEN FIN.FK_PEDIDO IS NOT NULL AND FIN.FK_PEDIDO > 0
                     THEN COALESCE(FIN.TOTAL_PARCELAS, 0)
@@ -360,12 +383,12 @@ class MigradorVendas:
             LEFT JOIN CADASTRO CVEND ON CVEND.ID = V.FK_VENDEDOR
             LEFT JOIN (
                 -- Agrupado para evitar duplicatas quando há > 1 NF por pedido
-                SELECT FK_PEDIDO, MIN(NRO_NOTA) AS NRO_NOTA
+                SELECT FK_PEDIDO, MAX(NRO_NOTA) AS NRO_NOTA
                 FROM NOTA_FISCAL
                 GROUP BY FK_PEDIDO
             ) NF ON NF.FK_PEDIDO = V.ID
             LEFT JOIN (
-                SELECT FK_PEDIDO, SUM(QUANTIDADE) AS QUANTIDADE
+                SELECT FK_PEDIDO, SUM(COALESCE(QUANTIDADE, 0)) AS QUANTIDADE
                 FROM PEDIDO_ITEM
                 GROUP BY FK_PEDIDO
             ) T  ON T.FK_PEDIDO = V.ID
@@ -423,3 +446,35 @@ class MigradorVendas:
             else:
                 valores.append(linha.get(col))
         return tuple(valores)
+
+    # =========================================================================
+    # MAPEAMENTO DE PAGAMENTO
+    # =========================================================================
+
+    def _carregar_mapeamento_pagamento(self):
+        """Carrega o JSON de mapeamento, se existir."""
+        caminho = "mapping_pagamento.json"
+        if os.path.exists(caminho):
+            try:
+                with open(caminho, "r", encoding="utf-8") as f:
+                    self._mapping_pagamento = json.load(f)
+                self.log(f"> Mapeamento de formas de pagamento carregado ({len(self._mapping_pagamento)} itens).")
+            except Exception as e:
+                self.log(f"⚠️ Erro ao carregar mapeamento_pagamento.json: {e}")
+        else:
+            self.log("> Nenhum mapeamento de formas de pagamento encontrado (usará IDs originais).")
+
+    def _aplicar_mapeamento_pagamento(self, dados: list[dict]):
+        """Substitui o idplano nos dados extraídos conforme o mapeamento."""
+        if not self._mapping_pagamento:
+            return
+
+        count = 0
+        for linha in dados:
+            forma_origem = linha.get("idpacking") # Campo que contém a descrição/nome na origem
+            if forma_origem in self._mapping_pagamento:
+                linha["idplano"] = self._mapping_pagamento[forma_origem]
+                count += 1
+        
+        if count > 0:
+            self.log(f"  > Mapeamento aplicado em {count:,} vendas.")

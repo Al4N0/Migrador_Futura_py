@@ -83,8 +83,8 @@ class MigradorItens:
             END AS idestoque,
             0 AS log,
             CASE
-                WHEN V.FK_TIPO_PEDIDO = 1 THEN 'V'
-                WHEN V.FK_TIPO_PEDIDO = 5 THEN 'D'
+                WHEN V.FK_TIPO_PEDIDO = '1' THEN 'V'
+                WHEN V.FK_TIPO_PEDIDO = '5' THEN 'D'
             END AS oper,
             COALESCE(I.VALOR_UNITARIO, 0) AS preco,
             CASE
@@ -191,7 +191,7 @@ class MigradorItens:
                 ELSE LEFT(PCB.CODIGO_BARRA, 30)
             END AS idestoque,
             0 AS log,
-            CASE WHEN V.FK_TIPO_PEDIDO = 1 THEN 'V' WHEN V.FK_TIPO_PEDIDO = 5 THEN 'D' END AS oper,
+            CASE WHEN V.FK_TIPO_PEDIDO = '1' THEN 'V' WHEN V.FK_TIPO_PEDIDO = '5' THEN 'D' END AS oper,
             COALESCE(I.VALOR_UNITARIO, 0) AS preco,
             CASE
                 WHEN (I.QUANTIDADE * I.VALOR_UNITARIO) > 0

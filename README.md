@@ -7,8 +7,9 @@ Aplicativo de conversão e extração de dados `Desktop > Web`, criado em Python
 ---
 
 ## Interface e Design 🎨
-* **Sidebar Escura (Estilo ERP)**: Painel lateral com parâmetros de controle e ações de migração.
+* **Super Hub de Configuração**: Toda a parametrização do sistema (Bancos, Loja, Empresa e Mapeamentos) centralizada em uma janela elegante com Menu Lateral e Abas.
 * **Componentes Premium**: Paleta de cores harmoniosa, cantos arredondados e tipografia clara.
+* **UX de Fluxo Contínuo (Master-Detail)**: A tela de mapeamento elimina janelas modais secundárias mantendo a listagem e busca em tela dividida, com avanço automático da seleção.
 * **Feedback Interativo**:
   - **Spinner de Animação** (⠋⠙⠹): Indicador visual durante extração de dados.
   - **Barra de Progresso Determinada**: Exibe `X / total` e percentual real (0–100%) durante a gravação.
@@ -17,12 +18,13 @@ Aplicativo de conversão e extração de dados `Desktop > Web`, criado em Python
 
 ## Funcionalidades 🌟
 
-### Parâmetros Globais (Sidebar)
-| Campo | Descrição |
+### Parâmetros Globais (Hub de Configurações)
+Toda a configuração antes feita solta no painel foi agrupada e otimizada:
+| Campo / Aba | Descrição |
 |---|---|
-| 🏪 **ID Loja** | Identificador numérico da loja destino — obrigatório para todas as migrações |
-| 🏢 **Empresa (Firebird)** | Seletor dinâmico populado automaticamente ao testar as conexões. Exibe `ID \| Razão Social` após seleção e detalhes completos (CNPJ + Qtd Vendas) ao abrir o dropdown |
-| ⚙️ **Configurar Bancos** | Abre janela modal para configurar Firebird e MySQL, com botão de teste |
+| 🛢️ **Bancos** | Configuração de credenciais Firebird e MySQL com salvamento local no arquivo `.env`. |
+| ⚙️ **Parâmetros** | **ID Loja** (destino) e **Seletor de Empresa** (Firebird - auto-populado após testar conexão). |
+| 💳 **Mapeamento de Pagamentos** | Ferramenta visual de de/para: Associa cada forma de pagamento do banco origem ao ID do `Plano` no banco destino. Salva as escolhas em JSON local. |
 
 ### Módulos de Migração
 | Botão | Tabelas Destino | Status |
