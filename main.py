@@ -129,6 +129,11 @@ class JanelaConfiguracoes(ctk.CTkToplevel):
                 frame.pack(fill="both", expand=True)
             else:
                 frame.pack_forget()
+
+        if nome == "pagam":
+            if not getattr(self, "pagam_carregado", False):
+                self.frame_map.carregar_dados()
+                self.pagam_carregado = True
         
         # Highlight no botão
         self.btn_aba_bancos.configure(fg_color=COR_CARD if nome == "bancos" else "transparent", text_color=COR_TEXTO if nome == "bancos" else COR_TEXTO_SECUNDARIO)
@@ -250,25 +255,12 @@ class JanelaConfiguracoes(ctk.CTkToplevel):
 
     def _montar_aba_pagam(self, frame):
         container = ctk.CTkFrame(frame, fg_color="transparent")
-        container.pack(fill="both", expand=True, padx=30, pady=20)
+        container.pack(fill="both", expand=True, padx=10, pady=10)
 
         self._criar_titulo_secao(container, "💳  Mapeamento de Pagamentos")
         
-        frame_aviso = ctk.CTkFrame(container, fg_color=COR_SIDEBAR, corner_radius=10)
-        frame_aviso.pack(fill="x", pady=(15, 25))
-        
-        ctk.CTkLabel(
-            frame_aviso, text="Configure como cada forma de pagamento proveniente do Firebird deve ser vinculada à tabela 'Planos' no destino MySQL. Isso garante a consistência das vendas migradas.", 
-            wraplength=450, justify="left", font=("", 13), text_color=COR_TEXTO
-        ).pack(padx=20, pady=20)
-        
-        btn = ctk.CTkButton(
-            container, text="🔗  Abrir Ferramenta de Mapeamento", height=50,
-            font=("", 15, "bold"), corner_radius=8,
-            fg_color=COR_CARD, hover_color=COR_ACCENT,
-            command=self.abrir_mapeamento_pagamento
-        )
-        btn.pack(fill="x")
+        self.frame_map = FrameMapeamentoPagamento(container, self, fg_color="transparent")
+        self.frame_map.pack(fill="both", expand=True)
 
     # --- HELPERS ---
     def _criar_titulo_secao(self, parent, texto):
@@ -381,38 +373,24 @@ class JanelaConfiguracoes(ctk.CTkToplevel):
         self.parent.log_message("🎉 Conexões testadas com sucesso! Configurações salvas.")
         # Habilita os botões de migração
         self.parent.conexoes_ok = True
+        self.btn_aba_params.pack(fill="x", padx=15, pady=4)
+        self.btn_aba_pagam.pack(fill="x", padx=15, pady=4)
+        self.pagam_carregado = False # Força recarregamento caso alterem os bancos
         self.parent.atualizar_estado_botoes()
         # Carrega as empresas do Firebird - agora atualiza tanto o hub quanto a sidebar (se houver)
         self.parent.carregar_empresas_firebird(
             path_fb, user_fb, pass_fb, host_fb, port_fb_int,
             callback_ui=lambda opts, sel: self.opt_empresa.configure(values=opts, state="normal") or self.opt_empresa.set(sel)
         )
-        # self.destroy() # Não fechar imediatamente para permitir selecionar empresa
-
-    def abrir_mapeamento_pagamento(self):
-        JanelaMapeamentoPagamento(self)
 
 
 # =============================================================================
-# JANELA DE MAPEAMENTO DE PAGAMENTO (MASTER-DETAIL AUTO-ADVANCE)
+# FRAME DE MAPEAMENTO DE PAGAMENTO (MASTER-DETAIL AUTO-ADVANCE)
 # =============================================================================
-class JanelaMapeamentoPagamento(ctk.CTkToplevel):
-    def __init__(self, parent_config, *args, **kwargs):
-        super().__init__(parent_config, *args, **kwargs)
+class FrameMapeamentoPagamento(ctk.CTkFrame):
+    def __init__(self, parent_container, parent_config, *args, **kwargs):
+        super().__init__(parent_container, *args, **kwargs)
         self.parent_config = parent_config
-        self.title("💳 Mapeamento de Formas de Pagamento")
-        self.configure(fg_color=COR_FUNDO_PRINCIPAL)
-
-        # Centralizar a janela (Aumentada para suportar 2 colunas)
-        largura_janela = 950
-        altura_janela = 600
-        largura_tela = self.winfo_screenwidth()
-        altura_tela = self.winfo_screenheight()
-        pos_x = int((largura_tela / 2) - (largura_janela / 2))
-        pos_y = int((altura_tela / 2) - (altura_janela / 2))
-        self.geometry(f"{largura_janela}x{altura_janela}+{pos_x}+{pos_y}")
-        self.minsize(800, 500)
-        self.grab_set()
 
         # Layout Base: 2 colunas principais e 1 linha para o footer
         self.grid_rowconfigure(0, weight=1) # Área de trabalho
@@ -469,15 +447,15 @@ class JanelaMapeamentoPagamento(ctk.CTkToplevel):
         self.btn_clear.pack(fill="x", pady=(15, 0))
 
         # ─── Footer ───────────────────────────────────────────────────
-        f_footer = ctk.CTkFrame(self, fg_color=COR_HEADER, height=70, corner_radius=0)
+        f_footer = ctk.CTkFrame(self, fg_color=COR_HEADER, height=60, corner_radius=0)
         f_footer.grid(row=1, column=0, columnspan=2, sticky="ew")
         
         self.btn_save = ctk.CTkButton(
-            f_footer, text="💾  Salvar Mapeamento e Fechar", height=45, width=300,
-            font=("", 15, "bold"), fg_color=COR_SUCCESS, hover_color=COR_SUCCESS_HOVER,
+            f_footer, text="💾  Salvar Mapeamento", height=40, width=250,
+            font=("", 14, "bold"), fg_color=COR_SUCCESS, hover_color=COR_SUCCESS_HOVER,
             command=self.salvar
         )
-        self.btn_save.pack(pady=12)
+        self.btn_save.pack(pady=10)
 
         # ─── Estado Interno ───────────────────────────────────────────
         self.formas_fb = []
@@ -488,8 +466,6 @@ class JanelaMapeamentoPagamento(ctk.CTkToplevel):
         self.map_bts_esq = {}     # { forma_origem: CTkButton } (Botões da esq para atualizar)
         
         self.forma_ativa = None
-
-        self.carregar_dados()
 
     def carregar_dados(self):
         """Busca formas no FB e planos no MySQL."""
@@ -537,9 +513,18 @@ class JanelaMapeamentoPagamento(ctk.CTkToplevel):
 
         except Exception as e:
             messagebox.showerror("Erro", f"Erro ao carregar dados para mapeamento: {e}")
-            self.destroy()
 
     def montar_listas(self):
+        # Limpar listas anteriores
+        for widget in self.scroll_esq.winfo_children():
+            widget.destroy()
+        for widget in self.scroll_dir.winfo_children():
+            widget.destroy()
+        
+        self.map_selecionado.clear()
+        self.map_bts_esq.clear()
+        self.botoes_planos.clear()
+        
         # Mapeamento atual salvo no disco
         current_map = {}
         if os.path.exists("mapping_pagamento.json"):
@@ -547,6 +532,18 @@ class JanelaMapeamentoPagamento(ctk.CTkToplevel):
                 current_map = json.load(f)
 
         plano_options_map = {p[0]: p[1] for p in self.planos_my}
+
+        # Melhoria de Performance: Criar TODOS os botões da direita uma única vez em memória
+        for pid, nome in self.planos_my:
+            btn = ctk.CTkButton(
+                self.scroll_dir, text=f"{pid} - {nome}",
+                fg_color="transparent", text_color=COR_TEXTO, anchor="w",
+                hover_color=COR_HEADER, height=35, font=("", 13),
+                command=lambda p=(pid, nome): self.selecionar_plano(p)
+            )
+            self.botoes_planos.append((pid, nome, btn))
+            
+        self.lbl_mais_opcoes = ctk.CTkLabel(self.scroll_dir, text="... (Digite mais para refinar os resultados)", font=("", 11, "italic"), text_color=COR_TEXTO_SECUNDARIO)
 
         # Popular Lado Esquerdo (FB)
         for forma in self.formas_fb:
@@ -609,27 +606,19 @@ class JanelaMapeamentoPagamento(ctk.CTkToplevel):
 
         termo = self.entry_busca.get().lower()
 
-        # Limpar
-        for b in self.botoes_planos:
-            b.destroy()
-        self.botoes_planos.clear()
+        # Limpar Apenas UI (Forget) - Muito mais rápido do que destruir
+        for pid, nome, btn in self.botoes_planos:
+            btn.pack_forget()
+        if hasattr(self, 'lbl_mais_opcoes'):
+            self.lbl_mais_opcoes.pack_forget()
 
         count = 0
-        for pid, nome in self.planos_my:
+        for pid, nome, btn in self.botoes_planos:
             if termo in str(pid).lower() or termo in nome.lower():
-                btn = ctk.CTkButton(
-                    self.scroll_dir, text=f"{pid} - {nome}",
-                    fg_color="transparent", text_color=COR_TEXTO, anchor="w",
-                    hover_color=COR_HEADER, height=35, font=("", 13),
-                    command=lambda p=(pid, nome): self.selecionar_plano(p)
-                )
                 btn.pack(fill="x", pady=2)
-                self.botoes_planos.append(btn)
                 count += 1
-            if count > 50: # Limite visual de performance
-                lbl = ctk.CTkLabel(self.scroll_dir, text="... (Digite mais para refinar os resultados)", font=("", 11, "italic"), text_color=COR_TEXTO_SECUNDARIO)
-                lbl.pack(pady=10)
-                self.botoes_planos.append(lbl)
+            if count >= 50: # Limite visual de performance
+                self.lbl_mais_opcoes.pack(pady=10)
                 break
 
     def selecionar_plano(self, plano_selecionado):
@@ -704,7 +693,7 @@ class JanelaMapeamentoPagamento(ctk.CTkToplevel):
             with open("mapping_pagamento.json", "w", encoding="utf-8") as f:
                 json.dump(mapping, f, ensure_ascii=False, indent=2)
             self.parent_config.parent.log_message(f"💾 Mapeamento associado com sucesso: {len(mapping)} formas de pagamento.")
-            self.destroy()
+            messagebox.showinfo("Sucesso", "Mapeamento salvo com sucesso!")
         except Exception as e:
             messagebox.showerror("Erro", f"Erro ao salvar mapeamento: {e}")
 
