@@ -30,10 +30,12 @@ Toda a configuração antes feita solta no painel foi agrupada e otimizada:
 | Botão | Tabelas Destino | Status |
 |---|---|---|
 | 👥 **Migrar Cliente** | `cliente` | ✅ Funcional |
-| 🛒 **Migrar Venda** | `venda` + `item` | ✅ Funcional |
-| ❌ **Truncate** | `item`, `venda`, `cliente` | ✅ Funcional |
+| 📦 **Migrar Produtos** | `produto` | ✅ Funcional |
+| 🏢 **Migrar Estoque** | `estoque` (SKUs) | ✅ Funcional |
+| 🛒 **Migrar Venda** | `venda` + `item` + `parcela` | ✅ Funcional |
+| ❌ **Truncate** | Limpa as tabelas antes. | ✅ Funcional |
 
-Cada módulo possui checkbox **"Truncar antes"** para limpar as tabelas destino antes de inserir.
+Cada módulo possui checkbox **"Truncar destino antes"** para limpar as tabelas destino antes de inserir.
 
 ### Migração de Vendas + Itens (1-a-1)
 A migração de vendas usa a abordagem **1-a-1 com pré-carregamento**:
@@ -58,11 +60,15 @@ Ao testar as conexões com sucesso, o sistema consulta automaticamente o Firebir
 ## Arquitetura dos Arquivos
 ```
 Migrador_Futura_py/
-├── main.py               # Interface principal (CustomTkinter)
-├── core.py               # Classes de conexão Firebird e MySQL
-├── migrador_clientes.py  # Módulo de migração de clientes
-├── migrador_vendas.py    # Módulo de migração de vendas (cabeçalho + orquestração)
-├── migrador_itens.py     # Módulo de migração de itens de venda (pré-carregamento)
+├── main.py               # Interface principal e UI CustomTkinter
+├── core.py               # Classes base de conexão Firebird e MySQL
+├── migrador_clientes.py  # Migrador de Clientes
+├── migrador_produtos.py  # Migrador de Produtos
+├── migrador_estoque.py   # Migrador de Estoque e SKUs
+├── migrador_vendas.py    # Orquestrador de Vendas
+├── migrador_itens.py     # Migrador de Itens de Venda (Sub-Módulo)
+├── migrador_parcelas.py  # Migrador de Parcelas (Sub-Módulo com Mapeamento Múltiplo)
+├── mapping_pagamento.json# Arquivo gerado via UI com as escolhas de mapeamento
 ├── requirements.txt      # Dependências Python
 ├── .env                  # Credenciais (ignorado pelo Git)
 └── logs/                 # Logs de migração (ignorado pelo Git)

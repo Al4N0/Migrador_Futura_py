@@ -1,6 +1,7 @@
 import fdb
 from core import ConexaoFirebird, ConexaoMySQL
 from migrador_itens import MigradorItens
+from migrador_parcelas import MigradorParcelas
 from loguru import logger
 import json
 import os
@@ -108,19 +109,34 @@ class MigradorVendas:
             finally:
                 cur_pre.close()
 
-            # 6c. Aplicar mapeamento de idplano nos dados carregados
-            self._aplicar_mapeamento_pagamento(dados)
+            # 6c. Instanciar e pré-carregar MigradorParcelas
+            migrador_parcelas = MigradorParcelas(
+                fb_conn=self.fb,
+                my_conn=self.my,
+                id_loja=self.id_loja,
+                fk_empresa=self.fk_empresa,
+                mapa_idvenda=self.mapa_idvenda,
+                mapping_pagamento=self._mapping_pagamento,
+                log_callback=self.log,
+            )
+            cur_pre_parc = self.fb.conn.cursor()
+            try:
+                migrador_parcelas.pre_carregar(cur_pre_parc)
+            finally:
+                cur_pre_parc.close()
 
-            # 7. Loop principal 1-a-1: venda → itens (do cache) → commit em lote
-            self.log("> Salvando vendas e itens no MySQL (1 a 1)...")
-            self._salvar_1a1(dados, migrador_itens, total)
+            # 6d. (Removido: Mapeamento agora é aplicado dinamicamente no loop _salvar_1a1)
+
+            # 7. Loop principal 1-a-1: venda → itens (do cache) → parcelas → commit em lote
+            self.log("> Salvando vendas, itens e parcelas no MySQL (1 a 1)...")
+            self._salvar_1a1(dados, migrador_itens, migrador_parcelas, total)
 
 
             self.log(
                 f"✅ Migração concluída! "
                 f"Vendas: {len(self.mapa_idvenda)} | "
-                f"Itens: {migrador_itens.total_inseridos} | "
-                f"Erros de item: {migrador_itens.total_erros}"
+                f"Itens: {migrador_itens.total_inseridos} ({migrador_itens.total_erros} erros) | "
+                f"Parcelas: {migrador_parcelas.total_inseridos} ({migrador_parcelas.total_erros} erros)"
             )
             return True
 
@@ -140,7 +156,7 @@ class MigradorVendas:
     # Maior = menos round-trips, mais dados em risco se cair no meio.
     BATCH_SIZE = 500
 
-    def _salvar_1a1(self, dados: list[dict], migrador_itens: MigradorItens, total: int):
+    def _salvar_1a1(self, dados: list[dict], migrador_itens: MigradorItens, migrador_parcelas: MigradorParcelas, total: int):
         """
         Para cada pedido em `dados`:
           1. INSERT na tabela venda → captura lastrowid → atualiza mapa_idvenda
@@ -181,6 +197,26 @@ class MigradorVendas:
         try:
             for idx, linha in enumerate(dados, start=1):
                 id_fb = linha["id_pedido_fb"]
+
+                # Ajusta idplano da Venda processando suas parcelas ativamente
+                parcelas_venda = migrador_parcelas._cache.get(id_fb, [])
+                formas_distintas = set(p.get("forma_pagamento", "").strip() for p in parcelas_venda if p.get("forma_pagamento"))
+                
+                if len(formas_distintas) > 1:
+                    forma_venda = "MULTIPLAS FORMAS"
+                elif len(formas_distintas) == 1:
+                    forma_base = list(formas_distintas)[0]
+                    total_parcelas = len(parcelas_venda)
+                    forma_venda = f"{forma_base} {total_parcelas}X" if total_parcelas > 1 else forma_base
+                else:
+                    forma_venda = ""
+
+                if forma_venda in self._mapping_pagamento:
+                    linha["idplano"] = self._mapping_pagamento[forma_venda]
+                elif len(formas_distintas) == 1 and list(formas_distintas)[0] in self._mapping_pagamento:
+                    linha["idplano"] = self._mapping_pagamento[list(formas_distintas)[0]]
+
+
                 valores_venda = self._montar_valores_venda(linha, colunas_venda)
 
                 try:
@@ -191,6 +227,9 @@ class MigradorVendas:
 
                     # ── INSERT itens (mesmo cursor, mesma transação) ──
                     migrador_itens.inserir_por_venda(id_fb, cursor_fb, cursor_my)
+
+                    # ── INSERT parcelas (do cache) ──
+                    migrador_parcelas.inserir_por_venda(id_fb, cursor_my)
 
                 except Exception as e:
                     erros_venda += 1
@@ -231,11 +270,12 @@ class MigradorVendas:
     # =========================================================================
 
     def _truncar_tabelas(self):
-        """Trunca item antes de venda (FK), depois venda."""
-        self.log("> Limpando tabelas 'item' e 'venda' no MySQL (TRUNCATE)...")
+        """Trunca parcela, item antes de venda (FK), depois venda."""
+        self.log("> Limpando tabelas 'parcela', 'item' e 'venda' no MySQL (TRUNCATE)...")
         cur = self.my.conn.cursor()
         try:
             cur.execute("SET FOREIGN_KEY_CHECKS = 0")
+            cur.execute("TRUNCATE TABLE parcela")
             cur.execute("TRUNCATE TABLE item")
             cur.execute("TRUNCATE TABLE venda")
             cur.execute("SET FOREIGN_KEY_CHECKS = 1")
@@ -472,7 +512,17 @@ class MigradorVendas:
         count = 0
         for linha in dados:
             forma_origem = linha.get("idpacking") # Campo que contém a descrição/nome na origem
-            if forma_origem in self._mapping_pagamento:
+            if forma_origem is None: forma_origem = ""
+            parcelas = linha.get("parcela", 0)
+            if parcelas is None: parcelas = 0
+
+            # Para lidar com mapeamentos tipo "CREDITO 4X", tenta combinar a forma_origem com " NX"
+            forma_x = f"{forma_origem} {parcelas}X".strip() if parcelas > 0 else forma_origem
+
+            if forma_x in self._mapping_pagamento:
+                linha["idplano"] = self._mapping_pagamento[forma_x]
+                count += 1
+            elif forma_origem in self._mapping_pagamento:
                 linha["idplano"] = self._mapping_pagamento[forma_origem]
                 count += 1
         

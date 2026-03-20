@@ -11,6 +11,8 @@ from core import ConexaoFirebird, ConexaoMySQL
 from migrador_clientes import MigradorClientes
 from migrador_vendas import MigradorVendas
 from migrador_itens import MigradorItens
+from migrador_produtos import MigradorProdutos
+from migrador_estoque import MigradorEstoque
 
 # Carrega as variáveis de ambiente do arquivo .env
 load_dotenv()
@@ -494,18 +496,45 @@ class FrameMapeamentoPagamento(ctk.CTkFrame):
             fb = ConexaoFirebird(path_fb, user_fb, pass_fb, host_fb, port_fb)
             if fb.conectar()[0]:
                 cur = fb.conn.cursor()
-                query = """
-                SELECT DISTINCT
-                    CASE
-                        WHEN CI.FK_CARTAO IS NOT NULL AND CI.FK_CARTAO > 0 THEN C.DESCRICAO
-                        ELSE TP.DESCRICAO
-                    END AS forma_pagamento
-                FROM CAIXA_ITEM CI
-                LEFT JOIN CARTAO C ON C.ID = CI.FK_CARTAO
-                LEFT JOIN TIPO_PAGAMENTO TP ON TP.ID = CI.FK_TIPO_PAGAMENTO
+                
+                query_base = """
+                SELECT DISTINCT F.FORMA FROM (
+                    SELECT CASE WHEN CI.FK_CARTAO > 0 THEN C.DESCRICAO ELSE TP.DESCRICAO END AS FORMA
+                    FROM CAIXA_ITEM CI LEFT JOIN CARTAO C ON C.ID = CI.FK_CARTAO LEFT JOIN TIPO_PAGAMENTO TP ON TP.ID = CI.FK_TIPO_PAGAMENTO
+                    UNION
+                    SELECT CASE WHEN C.FK_CARTAO > 0 THEN CA.DESCRICAO ELSE '' END AS FORMA
+                    FROM CONTA C JOIN CONTA_PARCELA CP ON CP.FK_CONTA = C.ID LEFT JOIN CARTAO CA ON CA.ID = C.FK_CARTAO
+                ) F WHERE F.FORMA IS NOT NULL AND F.FORMA <> ''
                 """
-                cur.execute(query)
-                self.formas_fb = [row[0] for row in cur.fetchall() if row[0]]
+                cur.execute(query_base)
+                base_forms = [row[0] for row in cur.fetchall() if row[0]]
+                self.formas_fb = base_forms.copy()
+                
+                query_parcelado_conta = """
+                SELECT DISTINCT FORMA || ' ' || QTD || 'X' FROM (
+                    SELECT C.FK_PEDIDO, CASE WHEN C.FK_CARTAO > 0 THEN CA.DESCRICAO ELSE '' END AS FORMA, COUNT(CP.ID) AS QTD
+                    FROM CONTA C JOIN CONTA_PARCELA CP ON CP.FK_CONTA = C.ID LEFT JOIN CARTAO CA ON CA.ID = C.FK_CARTAO
+                    GROUP BY C.FK_PEDIDO, FORMA
+                ) WHERE QTD > 1 AND FORMA <> ''
+                """
+                cur.execute(query_parcelado_conta)
+                for row in cur.fetchall():
+                    if row[0]: self.formas_fb.append(row[0].strip())
+                    
+                query_parcelado_caixa = """
+                SELECT DISTINCT FORMA || ' ' || QTD || 'X' FROM (
+                    SELECT CI.FK_PEDIDO, CASE WHEN CI.FK_CARTAO > 0 THEN C.DESCRICAO ELSE TP.DESCRICAO END AS FORMA, COUNT(CI.ID) AS QTD
+                    FROM CAIXA_ITEM CI LEFT JOIN CARTAO C ON C.ID = CI.FK_CARTAO LEFT JOIN TIPO_PAGAMENTO TP ON TP.ID = CI.FK_TIPO_PAGAMENTO
+                    GROUP BY CI.FK_PEDIDO, FORMA
+                ) WHERE QTD > 1 AND FORMA IS NOT NULL AND FORMA <> ''
+                """
+                cur.execute(query_parcelado_caixa)
+                for row in cur.fetchall():
+                    if row[0]: self.formas_fb.append(row[0].strip())
+                
+                self.formas_fb.append("MULTIPLAS FORMAS")
+                self.formas_fb = sorted(list(set(self.formas_fb)))
+                
                 cur.close()
                 fb.desconectar()
 
@@ -813,6 +842,28 @@ class AppMigrador(ctk.CTk):
         sep2 = ctk.CTkFrame(self.frame_sidebar, fg_color=COR_CARD, height=2)
         sep2.pack(fill="x", padx=20, pady=10)
 
+        # ── Botão Migrar Produtos (NOVO) ─────────────────────────
+        self.frame_mig_produto = self._criar_botao_migracao(
+            emoji="📦", titulo="Migrar Produtos",
+            cor_btn=COR_SUCCESS, cor_hover=COR_SUCCESS_HOVER,
+            comando=self.iniciar_migracao_produtos
+        )
+
+        # ── Separador ────────────────────────────────────────────
+        sep2_b = ctk.CTkFrame(self.frame_sidebar, fg_color=COR_CARD, height=2)
+        sep2_b.pack(fill="x", padx=20, pady=10)
+
+        # ── Botão Migrar Estoque (NOVO) ──────────────────────────
+        self.frame_mig_estoque = self._criar_botao_migracao(
+            emoji="🏢", titulo="Migrar Estoque",
+            cor_btn=COR_SUCCESS, cor_hover=COR_SUCCESS_HOVER,
+            comando=self.iniciar_migracao_estoque
+        )
+
+        # ── Separador ────────────────────────────────────────────
+        sep2_c = ctk.CTkFrame(self.frame_sidebar, fg_color=COR_CARD, height=2)
+        sep2_c.pack(fill="x", padx=20, pady=10)
+
         # ── Botão Migrar Venda ───────────────────────────────────
         self.frame_mig_venda = self._criar_botao_migracao(
             emoji="🛒", titulo="Migrar Venda",
@@ -940,6 +991,8 @@ class AppMigrador(ctk.CTk):
         """Habilita/desabilita botões de migração conforme o estado."""
         estado = "normal" if self.conexoes_ok else "disabled"
         self.frame_mig_cliente.btn.configure(state=estado)
+        self.frame_mig_produto.btn.configure(state=estado)
+        self.frame_mig_estoque.btn.configure(state=estado)
         self.frame_mig_venda.btn.configure(state=estado)
         self.btn_truncate.configure(state=estado)
 
@@ -1156,6 +1209,111 @@ class AppMigrador(ctk.CTk):
             finally:
                 self._fechar_log_arquivo()
                 self.after(0, lambda: self.frame_mig_cliente.btn.configure(state="normal"))
+
+        threading.Thread(target=thread_migracao, daemon=True).start()
+
+    def iniciar_migracao_produtos(self):
+        # Validar ID Loja
+        id_loja = self.validar_id_loja()
+        if id_loja is None:
+            return
+
+        self.log_message("\n📦 ===============================================")
+        self.log_message(f"📦 [Iniciando] Migração de Produtos (Loja: {id_loja})")
+        self.log_message("📦 ===============================================")
+        self.frame_mig_produto.btn.configure(state="disabled")
+        self.iniciar_spinner("Migrando Produtos...")
+
+        # Recuperar conexões do .env
+        load_dotenv(override=True)
+        path_fb = os.getenv("FB_PATH")
+        user_fb = os.getenv("FB_USER")
+        pass_fb = os.getenv("FB_PASS")
+        host_fb = os.getenv("FB_HOST", "localhost")
+        port_fb = int(os.getenv("FB_PORT", 3050))
+
+        host_my = os.getenv("MYSQL_HOST")
+        user_my = os.getenv("MYSQL_USER")
+        pass_my = os.getenv("MYSQL_PASS")
+        db_my = os.getenv("MYSQL_DB")
+
+        fb = ConexaoFirebird(path_fb, user_fb, pass_fb, host_fb, port_fb)
+        my = ConexaoMySQL(host_my, user_my, pass_my, db_my)
+
+        migrador = MigradorProdutos(fb, my, id_loja=id_loja, log_callback=self.log_message)
+
+        truncar_antes = self.frame_mig_produto.chk_var.get()
+
+        def thread_migracao():
+            caminho_log = self._abrir_log_arquivo("produtos")
+            self.log_message(f"📄 Log salvo em: {caminho_log}")
+            try:
+                sucesso = migrador.executar(truncar=truncar_antes)
+                if sucesso:
+                    self.after(0, lambda: self.parar_spinner())
+                    self.after(50, lambda: self.atualizar_progresso(1.0, "✅ Concluído!"))
+                    self.log_message("✅ Migração de Produtos concluída.")
+                else:
+                    self.after(0, lambda: self.parar_spinner())
+                    self.after(50, lambda: self.atualizar_progresso(0, "❌ Falhou"))
+                    self.log_message("❌ Migração de Produtos falhou.")
+            except Exception as e:
+                self.log_message(f"❌ Erro inesperado: {e}")
+            finally:
+                self._fechar_log_arquivo()
+                self.after(0, lambda: self.frame_mig_produto.btn.configure(state="normal"))
+
+        threading.Thread(target=thread_migracao, daemon=True).start()
+
+    def iniciar_migracao_estoque(self):
+        # Validar ID Loja
+        id_loja = self.validar_id_loja()
+        if id_loja is None:
+            return
+
+        self.log_message("\n🏢 ===============================================")
+        self.log_message(f"🏢 [Iniciando] Migração de Estoque (Loja: {id_loja})")
+        self.log_message("🏢 ===============================================")
+        self.frame_mig_estoque.btn.configure(state="disabled")
+        self.iniciar_spinner("Migrando Estoque...")
+
+        load_dotenv(override=True)
+        path_fb = os.getenv("FB_PATH")
+        user_fb = os.getenv("FB_USER")
+        pass_fb = os.getenv("FB_PASS")
+        host_fb = os.getenv("FB_HOST", "localhost")
+        port_fb = int(os.getenv("FB_PORT", 3050))
+
+        host_my = os.getenv("MYSQL_HOST")
+        user_my = os.getenv("MYSQL_USER")
+        pass_my = os.getenv("MYSQL_PASS")
+        db_my = os.getenv("MYSQL_DB")
+
+        fb = ConexaoFirebird(path_fb, user_fb, pass_fb, host_fb, port_fb)
+        my = ConexaoMySQL(host_my, user_my, pass_my, db_my)
+
+        migrador = MigradorEstoque(fb, my, id_loja=id_loja, log_callback=self.log_message)
+
+        truncar_antes = self.frame_mig_estoque.chk_var.get()
+
+        def thread_migracao():
+            caminho_log = self._abrir_log_arquivo("estoque")
+            self.log_message(f"📄 Log salvo em: {caminho_log}")
+            try:
+                sucesso = migrador.executar(truncar=truncar_antes)
+                if sucesso:
+                    self.after(0, lambda: self.parar_spinner())
+                    self.after(50, lambda: self.atualizar_progresso(1.0, "✅ Concluído!"))
+                    self.log_message("✅ Migração de Estoque concluída.")
+                else:
+                    self.after(0, lambda: self.parar_spinner())
+                    self.after(50, lambda: self.atualizar_progresso(0, "❌ Falhou"))
+                    self.log_message("❌ Migração de Estoque falhou.")
+            except Exception as e:
+                self.log_message(f"❌ Erro inesperado: {e}")
+            finally:
+                self._fechar_log_arquivo()
+                self.after(0, lambda: self.frame_mig_estoque.btn.configure(state="normal"))
 
         threading.Thread(target=thread_migracao, daemon=True).start()
 
