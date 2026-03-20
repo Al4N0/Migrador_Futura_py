@@ -91,7 +91,7 @@ class MigradorVendas:
             # Sinaliza o total para a UI iniciar modo determinado
             self.progress(0, total)
 
-            # 6. Instanciar MigradorItens (compartilha conexões, sem abrir novas)
+            # 6. Instanciar MigradorItens e MigradorParcelas
             migrador_itens = MigradorItens(
                 fb_conn=self.fb,
                 my_conn=self.my,
@@ -100,12 +100,20 @@ class MigradorVendas:
                 mapa_idvenda=self.mapa_idvenda,
                 log_callback=self.log,
             )
+            migrador_parcelas = MigradorParcelas(
+                fb_conn=self.fb,
+                my_conn=self.my,
+                id_loja=self.id_loja,
+                fk_empresa=self.fk_empresa,
+                mapa_idvenda=self.mapa_idvenda,
+                log_callback=self.log,
+            )
 
-            # 6b. Pré-carregar TODOS os itens em memória com UMA query Firebird.
-            #     Elimina ~100k round-trips individuais durante o loop de vendas.
+            # 6b. Pré-carregar TODOS os itens e parcelas em memória
             cur_pre = self.fb.conn.cursor()
             try:
                 migrador_itens.pre_carregar(cur_pre)
+                migrador_parcelas.pre_carregar(cur_pre)
             finally:
                 cur_pre.close()
 
@@ -225,8 +233,9 @@ class MigradorVendas:
                     idvenda_mysql = cursor_my.lastrowid
                     self.mapa_idvenda[id_fb] = idvenda_mysql
 
-                    # ── INSERT itens (mesmo cursor, mesma transação) ──
+                    # ── INSERT itens e parcelas (mesmo cursor, mesma transação) ──
                     migrador_itens.inserir_por_venda(id_fb, cursor_fb, cursor_my)
+                    migrador_parcelas.inserir_por_venda(id_fb, cursor_fb, cursor_my)
 
                     # ── INSERT parcelas (do cache) ──
                     migrador_parcelas.inserir_por_venda(id_fb, cursor_my)
