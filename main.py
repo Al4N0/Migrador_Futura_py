@@ -485,7 +485,7 @@ class FrameMapeamentoPagamento(ctk.CTkFrame):
             my = ConexaoMySQL(host_my, user_my, pass_my, db_my)
             if my.conectar()[0]:
                 cur = my.conn.cursor()
-                cur.execute("SELECT id, nome FROM plano ORDER BY nome")
+                cur.execute("SELECT id, nome, idforma FROM plano ORDER BY nome")
                 self.planos_my = cur.fetchall()
                 cur.close()
                 my.desconectar()
@@ -531,17 +531,17 @@ class FrameMapeamentoPagamento(ctk.CTkFrame):
             with open("mapping_pagamento.json", "r", encoding="utf-8") as f:
                 current_map = json.load(f)
 
-        plano_options_map = {p[0]: p[1] for p in self.planos_my}
+        plano_options_map = {p[0]: (p[1], p[2]) for p in self.planos_my}
 
         # Melhoria de Performance: Criar TODOS os botões da direita uma única vez em memória
-        for pid, nome in self.planos_my:
+        for pid, nome, idforma in self.planos_my:
             btn = ctk.CTkButton(
                 self.scroll_dir, text=f"{pid} - {nome}",
                 fg_color="transparent", text_color=COR_TEXTO, anchor="w",
                 hover_color=COR_HEADER, height=35, font=("", 13),
-                command=lambda p=(pid, nome): self.selecionar_plano(p)
+                command=lambda p=(pid, nome, idforma): self.selecionar_plano(p)
             )
-            self.botoes_planos.append((pid, nome, btn))
+            self.botoes_planos.append((pid, nome, idforma, btn))
             
         self.lbl_mais_opcoes = ctk.CTkLabel(self.scroll_dir, text="... (Digite mais para refinar os resultados)", font=("", 11, "italic"), text_color=COR_TEXTO_SECUNDARIO)
 
@@ -552,18 +552,24 @@ class FrameMapeamentoPagamento(ctk.CTkFrame):
             item_frame.pack(fill="x", pady=4, padx=5)
 
             # Define estado inicial baseado no JSON
-            id_salvo = current_map.get(forma)
+            salvo_raw = current_map.get(forma)
+            if isinstance(salvo_raw, dict):
+                id_salvo = salvo_raw.get("idplano")
+            else:
+                id_salvo = salvo_raw
+
             texto_inicial = forma
             cor_texto = COR_TEXTO_SECUNDARIO
 
             if id_salvo and id_salvo in plano_options_map:
-                self.map_selecionado[forma] = (id_salvo, plano_options_map[id_salvo])
-                texto_inicial = f"{forma}\n👉 {id_salvo} - {plano_options_map[id_salvo]}"
+                nome_plano, idforma_plano = plano_options_map[id_salvo]
+                self.map_selecionado[forma] = (id_salvo, nome_plano, idforma_plano)
+                texto_inicial = f"{forma}  |  ✓ {id_salvo} - {nome_plano}"
                 cor_texto = COR_SUCCESS # Indica que já está mapeado!
 
             # Botão que representa a forma inteira
             btn = ctk.CTkButton(
-                item_frame, text=texto_inicial, anchor="w",
+                item_frame, text=texto_inicial,
                 font=("", 13, "bold"), height=50,
                 fg_color="transparent", text_color=cor_texto, hover_color=COR_HEADER,
                 command=lambda f=forma: self.ativar_forma(f)
@@ -607,13 +613,13 @@ class FrameMapeamentoPagamento(ctk.CTkFrame):
         termo = self.entry_busca.get().lower()
 
         # Limpar Apenas UI (Forget) - Muito mais rápido do que destruir
-        for pid, nome, btn in self.botoes_planos:
+        for pid, nome, idforma, btn in self.botoes_planos:
             btn.pack_forget()
         if hasattr(self, 'lbl_mais_opcoes'):
             self.lbl_mais_opcoes.pack_forget()
 
         count = 0
-        for pid, nome, btn in self.botoes_planos:
+        for pid, nome, idforma, btn in self.botoes_planos:
             if termo in str(pid).lower() or termo in nome.lower():
                 btn.pack(fill="x", pady=2)
                 count += 1
@@ -627,12 +633,12 @@ class FrameMapeamentoPagamento(ctk.CTkFrame):
             return
         
         # 1. Salvar Associação
-        pid, nome = plano_selecionado
-        self.map_selecionado[self.forma_ativa] = (pid, nome)
+        pid, nome, idforma = plano_selecionado
+        self.map_selecionado[self.forma_ativa] = (pid, nome, idforma)
         
         # 2. Atualizar UI da Esquerda
         btn = self.map_bts_esq[self.forma_ativa]
-        btn.configure(text=f"{self.forma_ativa}\n✅ {pid} - {nome}")
+        btn.configure(text=f"{self.forma_ativa}  |  ✓ {pid} - {nome}")
 
         # 3. Avançar para a próxima "não mapaeada" (Auto-Advance UX Magic)
         self.avancar_proxima_nao_mapeada()
@@ -686,8 +692,8 @@ class FrameMapeamentoPagamento(ctk.CTkFrame):
     def salvar(self):
         mapping = {}
         for forma, dados in self.map_selecionado.items():
-            id_plano, _ = dados
-            mapping[forma] = id_plano
+            id_plano, nome_plano, idforma = dados
+            mapping[forma] = {"idplano": id_plano, "idforma": idforma}
 
         try:
             with open("mapping_pagamento.json", "w", encoding="utf-8") as f:

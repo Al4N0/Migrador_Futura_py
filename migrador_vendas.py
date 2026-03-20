@@ -1,6 +1,7 @@
 import fdb
 from core import ConexaoFirebird, ConexaoMySQL
 from migrador_itens import MigradorItens
+from migrador_parcelas import MigradorParcelas
 from loguru import logger
 import json
 import os
@@ -90,7 +91,7 @@ class MigradorVendas:
             # Sinaliza o total para a UI iniciar modo determinado
             self.progress(0, total)
 
-            # 6. Instanciar MigradorItens (compartilha conexões, sem abrir novas)
+            # 6. Instanciar MigradorItens e MigradorParcelas
             migrador_itens = MigradorItens(
                 fb_conn=self.fb,
                 my_conn=self.my,
@@ -99,28 +100,38 @@ class MigradorVendas:
                 mapa_idvenda=self.mapa_idvenda,
                 log_callback=self.log,
             )
+            migrador_parcelas = MigradorParcelas(
+                fb_conn=self.fb,
+                my_conn=self.my,
+                id_loja=self.id_loja,
+                fk_empresa=self.fk_empresa,
+                mapa_idvenda=self.mapa_idvenda,
+                log_callback=self.log,
+            )
 
-            # 6b. Pré-carregar TODOS os itens em memória com UMA query Firebird.
-            #     Elimina ~100k round-trips individuais durante o loop de vendas.
+            # 6b. Pré-carregar TODOS os itens e parcelas em memória
             cur_pre = self.fb.conn.cursor()
             try:
                 migrador_itens.pre_carregar(cur_pre)
+                migrador_parcelas.pre_carregar(cur_pre)
             finally:
                 cur_pre.close()
 
             # 6c. Aplicar mapeamento de idplano nos dados carregados
             self._aplicar_mapeamento_pagamento(dados)
 
-            # 7. Loop principal 1-a-1: venda → itens (do cache) → commit em lote
-            self.log("> Salvando vendas e itens no MySQL (1 a 1)...")
-            self._salvar_1a1(dados, migrador_itens, total)
+            # 7. Loop principal 1-a-1: venda → itens/parcelas → commit em lote
+            self.log("> Salvando vendas, itens e parcelas no MySQL (1 a 1)...")
+            self._salvar_1a1(dados, migrador_itens, migrador_parcelas, total)
 
 
             self.log(
                 f"✅ Migração concluída! "
                 f"Vendas: {len(self.mapa_idvenda)} | "
                 f"Itens: {migrador_itens.total_inseridos} | "
-                f"Erros de item: {migrador_itens.total_erros}"
+                f"Parcelas: {migrador_parcelas.total_inseridos} | "
+                f"Erros de item: {migrador_itens.total_erros} | "
+                f"Erros de parcela: {migrador_parcelas.total_erros}"
             )
             return True
 
@@ -140,7 +151,7 @@ class MigradorVendas:
     # Maior = menos round-trips, mais dados em risco se cair no meio.
     BATCH_SIZE = 500
 
-    def _salvar_1a1(self, dados: list[dict], migrador_itens: MigradorItens, total: int):
+    def _salvar_1a1(self, dados: list[dict], migrador_itens: MigradorItens, migrador_parcelas: MigradorParcelas, total: int):
         """
         Para cada pedido em `dados`:
           1. INSERT na tabela venda → captura lastrowid → atualiza mapa_idvenda
@@ -189,8 +200,9 @@ class MigradorVendas:
                     idvenda_mysql = cursor_my.lastrowid
                     self.mapa_idvenda[id_fb] = idvenda_mysql
 
-                    # ── INSERT itens (mesmo cursor, mesma transação) ──
+                    # ── INSERT itens e parcelas (mesmo cursor, mesma transação) ──
                     migrador_itens.inserir_por_venda(id_fb, cursor_fb, cursor_my)
+                    migrador_parcelas.inserir_por_venda(id_fb, cursor_fb, cursor_my)
 
                 except Exception as e:
                     erros_venda += 1
@@ -236,6 +248,7 @@ class MigradorVendas:
         cur = self.my.conn.cursor()
         try:
             cur.execute("SET FOREIGN_KEY_CHECKS = 0")
+            cur.execute("TRUNCATE TABLE parcela")
             cur.execute("TRUNCATE TABLE item")
             cur.execute("TRUNCATE TABLE venda")
             cur.execute("SET FOREIGN_KEY_CHECKS = 1")
@@ -473,7 +486,11 @@ class MigradorVendas:
         for linha in dados:
             forma_origem = linha.get("idpacking") # Campo que contém a descrição/nome na origem
             if forma_origem in self._mapping_pagamento:
-                linha["idplano"] = self._mapping_pagamento[forma_origem]
+                mapped_val = self._mapping_pagamento[forma_origem]
+                if isinstance(mapped_val, dict):
+                    linha["idplano"] = mapped_val.get("idplano", 0)
+                else:
+                    linha["idplano"] = mapped_val
                 count += 1
         
         if count > 0:

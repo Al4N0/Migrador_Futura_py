@@ -1,28 +1,106 @@
 {
-  "1X REDE": 23,
-  "BOLETO": 47,
-  "CARTAO CREDITO": 23,
-  "CARTAO DEBITO": 2,
-  "CARTAO ONLINE": 35,
-  "CHEQUE": 11,
-  "CONTRA VALE": 10,
-  "CREDITO": 23,
-  "CREDITO 1X": 23,
-  "CREDITO 2X": 24,
-  "CREDITO 3X": 25,
-  "CREDITO 4X": 26,
-  "DEBITO": 2,
-  "DEPOSITO": 71,
-  "DINHEIRO": 1,
-  "FATURA": 47,
-  "MERCADO LIVRE": 35,
-  "MOSTRUARIO": 10,
-  "PIX": 79,
-  "PIX CARTAO ": 79,
-  "SKYHUB": 10,
-  "TROCAS E DEVOLUCOES": 8,
-  "VALE DE FUNCIONARIOS": 10,
-  "VALE TROCA": 10,
-  "VALOR EM HAVER": 10,
-  "VESTI": 10
+    "1X REDE": {
+        "idplano": 23,
+        "idforma": 3
+    },
+    "BOLETO": {
+        "idplano": 47,
+        "idforma": 15
+    },
+    "CARTAO CREDITO": {
+        "idplano": 23,
+        "idforma": 3
+    },
+    "CARTAO DEBITO": {
+        "idplano": 2,
+        "idforma": 4
+    },
+    "CARTAO ONLINE": {
+        "idplano": 35,
+        "idforma": 3
+    },
+    "CHEQUE": {
+        "idplano": 11,
+        "idforma": 2
+    },
+    "CONTRA VALE": {
+        "idplano": 10,
+        "idforma": 99
+    },
+    "CREDITO": {
+        "idplano": 23,
+        "idforma": 3
+    },
+    "CREDITO 1X": {
+        "idplano": 23,
+        "idforma": 3
+    },
+    "CREDITO 2X": {
+        "idplano": 24,
+        "idforma": 3
+    },
+    "CREDITO 3X": {
+        "idplano": 25,
+        "idforma": 3
+    },
+    "CREDITO 4X": {
+        "idplano": 26,
+        "idforma": 3
+    },
+    "DEBITO": {
+        "idplano": 2,
+        "idforma": 4
+    },
+    "DEPOSITO": {
+        "idplano": 71,
+        "idforma": 16
+    },
+    "DINHEIRO": {
+        "idplano": 1,
+        "idforma": 1
+    },
+    "FATURA": {
+        "idplano": 47,
+        "idforma": 15
+    },
+    "MERCADO LIVRE": {
+        "idplano": 35,
+        "idforma": 3
+    },
+    "MOSTRUARIO": {
+        "idplano": 10,
+        "idforma": 99
+    },
+    "PIX": {
+        "idplano": 79,
+        "idforma": 17
+    },
+    "PIX CARTAO ": {
+        "idplano": 79,
+        "idforma": 17
+    },
+    "SKYHUB": {
+        "idplano": 10,
+        "idforma": 99
+    },
+    "TROCAS E DEVOLUCOES": {
+        "idplano": 8,
+        "idforma": 90
+    },
+    "VALE DE FUNCIONARIOS": {
+        "idplano": 10,
+        "idforma": 99
+    },
+    "VALE TROCA": {
+        "idplano": 10,
+        "idforma": 99
+    },
+    "VALOR EM HAVER": {
+        "idplano": 10,
+        "idforma": 99
+    },
+    "VESTI": {
+        "idplano": 10,
+        "idforma": 99
+    }
 }
