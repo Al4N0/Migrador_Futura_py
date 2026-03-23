@@ -29,6 +29,9 @@ Toda a configuração antes feita solta no painel foi agrupada e otimizada:
 ### Módulos de Migração
 | Botão | Tabelas Destino | Status |
 |---|---|---|
+| 👤 **Migrar Usuários** | `usuario` | ✅ Funcional |
+| 🚚 **Migrar Fornecedores** | `fornecedor` | ✅ Funcional |
+| 💼 **Migrar Vendedores** | `vendedor` | ✅ Funcional |
 | 👥 **Migrar Cliente** | `cliente` | ✅ Funcional |
 | 📦 **Migrar Produtos** | `produto` | ✅ Funcional |
 | 🏢 **Migrar Estoque** | `estoque` (SKUs) | ✅ Funcional |
@@ -65,6 +68,9 @@ Migrador_Futura_py/
 ├── migrador_clientes.py  # Migrador de Clientes
 ├── migrador_produtos.py  # Migrador de Produtos
 ├── migrador_estoque.py   # Migrador de Estoque e SKUs
+├── migrador_usuarios.py  # Migrador de Usuários
+├── migrador_fornecedores.py # Migrador de Fornecedores
+├── migrador_vendedores.py# Migrador de Vendedores
 ├── migrador_vendas.py    # Orquestrador de Vendas
 ├── migrador_itens.py     # Migrador de Itens de Venda (Sub-Módulo)
 ├── migrador_parcelas.py  # Migrador de Parcelas (Sub-Módulo com Mapeamento Múltiplo)

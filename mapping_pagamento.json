@@ -1,65 +1,254 @@
 {
-  "1X REDE": 23,
-  "BOLETO": 47,
-  "CARTAO CREDITO": 23,
-  "CARTAO DEBITO": 2,
-  "CARTAO ONLINE": 35,
-  "CHEQUE": 11,
-  "CONTRA VALE": 10,
-  "CREDITO": 23,
-  "CREDITO 1X": 23,
-  "CREDITO 2X": 24,
-  "CREDITO 3X": 25,
-  "CREDITO 4X": 26,
-  "DEBITO": 2,
-  "DEPOSITO": 71,
-  "DINHEIRO": 1,
-  "FATURA": 47,
-  "MERCADO LIVRE": 35,
-  "MOSTRUARIO": 10,
-  "MULTIPLAS FORMAS": 3,
-  "PIX": 79,
-  "PIX CARTAO ": 79,
-  "SKYHUB": 10,
-  "TROCAS E DEVOLUCOES": 8,
-  "VALE DE FUNCIONARIOS": 10,
-  "VALE TROCA": 10,
-  "VALOR EM HAVER": 10,
-  "VESTI": 10,
-  "1X REDE 2X": 24,
-  "1X REDE 3X": 25,
-  "BOLETO 5866X": 47,
-  "CARTAO CREDITO 5871X": 23,
-  "CARTAO DEBITO 5866X": 2,
-  "CARTAO ONLINE 2X": 24,
-  "CARTAO ONLINE 5870X": 35,
-  "CHEQUE 5874X": 11,
-  "CONTRA VALE 5871X": 10,
-  "CREDITO 2X 2X": 24,
-  "CREDITO 2X 3X": 25,
-  "CREDITO 2X 4X": 26,
-  "CREDITO 2X 6X": 28,
-  "CREDITO 3X 2X": 24,
-  "CREDITO 3X 3X": 25,
-  "CREDITO 3X 6X": 28,
-  "CREDITO 4X 2X": 24,
-  "CREDITO 4X 4X": 26,
-  "CREDITO 4X 8X": 30,
-  "CREDITO 8X": 30,
-  "DEBITO 2X": 2,
-  "DEPOSITO 5866X": 71,
-  "DINHEIRO 11762X": 1,
-  "DINHEIRO 2X": 1,
-  "FATURA 5871X": 47,
-  "MERCADO LIVRE 3249X": 35,
-  "MOSTRUARIO 5866X": 10,
-  "PIX 1949X": 79,
-  "PIX CARTAO  188X": 79,
-  "SKYHUB 3249X": 10,
-  "TROCAS E DEVOLUCOES 2X": 8,
-  "TROCAS E DEVOLUCOES 5871X": 8,
-  "VALE DE FUNCIONARIOS 5863X": 10,
-  "VALE TROCA 1447X": 10,
-  "VALOR EM HAVER 3235X": 10,
-  "VESTI 2037X": 10
+  "1X REDE": {
+    "idplano": 23,
+    "idforma": 3
+  },
+  "1X REDE 2X": {
+    "idplano": 24,
+    "idforma": 3
+  },
+  "1X REDE 3X": {
+    "idplano": 25,
+    "idforma": 3
+  },
+  "BOLETO": {
+    "idplano": 47,
+    "idforma": 15
+  },
+  "BOLETO 5866X": {
+    "idplano": 47,
+    "idforma": 15
+  },
+  "CARTAO CREDITO": {
+    "idplano": 23,
+    "idforma": 3
+  },
+  "CARTAO CREDITO 5871X": {
+    "idplano": 23,
+    "idforma": 3
+  },
+  "CARTAO DEBITO": {
+    "idplano": 2,
+    "idforma": 4
+  },
+  "CARTAO DEBITO 5866X": {
+    "idplano": 2,
+    "idforma": 4
+  },
+  "CARTAO ONLINE": {
+    "idplano": 35,
+    "idforma": 3
+  },
+  "CARTAO ONLINE 2X": {
+    "idplano": 24,
+    "idforma": 3
+  },
+  "CARTAO ONLINE 5870X": {
+    "idplano": 35,
+    "idforma": 3
+  },
+  "CHEQUE": {
+    "idplano": 11,
+    "idforma": 2
+  },
+  "CHEQUE 5874X": {
+    "idplano": 11,
+    "idforma": 2
+  },
+  "CONTRA VALE": {
+    "idplano": 10,
+    "idforma": 99
+  },
+  "CONTRA VALE 5871X": {
+    "idplano": 10,
+    "idforma": 99
+  },
+  "CREDITO": {
+    "idplano": 23,
+    "idforma": 3
+  },
+  "CREDITO 1X": {
+    "idplano": 23,
+    "idforma": 3
+  },
+  "CREDITO 2X": {
+    "idplano": 24,
+    "idforma": 3
+  },
+  "CREDITO 2X 2X": {
+    "idplano": 24,
+    "idforma": 3
+  },
+  "CREDITO 2X 3X": {
+    "idplano": 25,
+    "idforma": 3
+  },
+  "CREDITO 2X 4X": {
+    "idplano": 26,
+    "idforma": 3
+  },
+  "CREDITO 2X 6X": {
+    "idplano": 28,
+    "idforma": 3
+  },
+  "CREDITO 3X": {
+    "idplano": 25,
+    "idforma": 3
+  },
+  "CREDITO 3X 2X": {
+    "idplano": 24,
+    "idforma": 3
+  },
+  "CREDITO 3X 3X": {
+    "idplano": 25,
+    "idforma": 3
+  },
+  "CREDITO 3X 6X": {
+    "idplano": 28,
+    "idforma": 3
+  },
+  "CREDITO 4X": {
+    "idplano": 26,
+    "idforma": 3
+  },
+  "CREDITO 4X 2X": {
+    "idplano": 24,
+    "idforma": 3
+  },
+  "CREDITO 4X 4X": {
+    "idplano": 26,
+    "idforma": 3
+  },
+  "CREDITO 4X 8X": {
+    "idplano": 30,
+    "idforma": 3
+  },
+  "CREDITO 8X": {
+    "idplano": 30,
+    "idforma": 3
+  },
+  "DEBITO": {
+    "idplano": 2,
+    "idforma": 4
+  },
+  "DEBITO 2X": {
+    "idplano": 2,
+    "idforma": 4
+  },
+  "DEPOSITO": {
+    "idplano": 71,
+    "idforma": 16
+  },
+  "DEPOSITO 5866X": {
+    "idplano": 71,
+    "idforma": 16
+  },
+  "DINHEIRO": {
+    "idplano": 1,
+    "idforma": 1
+  },
+  "DINHEIRO 11762X": {
+    "idplano": 1,
+    "idforma": 1
+  },
+  "DINHEIRO 2X": {
+    "idplano": 1,
+    "idforma": 1
+  },
+  "FATURA": {
+    "idplano": 47,
+    "idforma": 15
+  },
+  "FATURA 5871X": {
+    "idplano": 47,
+    "idforma": 15
+  },
+  "MERCADO LIVRE": {
+    "idplano": 35,
+    "idforma": 3
+  },
+  "MERCADO LIVRE 3249X": {
+    "idplano": 35,
+    "idforma": 3
+  },
+  "MOSTRUARIO": {
+    "idplano": 10,
+    "idforma": 99
+  },
+  "MOSTRUARIO 5866X": {
+    "idplano": 10,
+    "idforma": 99
+  },
+  "MULTIPLAS FORMAS": {
+    "idplano": 3,
+    "idforma": 100
+  },
+  "PIX": {
+    "idplano": 79,
+    "idforma": 17
+  },
+  "PIX 1949X": {
+    "idplano": 79,
+    "idforma": 17
+  },
+  "PIX CARTAO ": {
+    "idplano": 79,
+    "idforma": 17
+  },
+  "PIX CARTAO  188X": {
+    "idplano": 79,
+    "idforma": 17
+  },
+  "SKYHUB": {
+    "idplano": 10,
+    "idforma": 99
+  },
+  "SKYHUB 3249X": {
+    "idplano": 10,
+    "idforma": 99
+  },
+  "TROCAS E DEVOLUCOES": {
+    "idplano": 8,
+    "idforma": 90
+  },
+  "TROCAS E DEVOLUCOES 2X": {
+    "idplano": 8,
+    "idforma": 90
+  },
+  "TROCAS E DEVOLUCOES 5871X": {
+    "idplano": 8,
+    "idforma": 90
+  },
+  "VALE DE FUNCIONARIOS": {
+    "idplano": 10,
+    "idforma": 99
+  },
+  "VALE DE FUNCIONARIOS 5863X": {
+    "idplano": 10,
+    "idforma": 99
+  },
+  "VALE TROCA": {
+    "idplano": 10,
+    "idforma": 99
+  },
+  "VALE TROCA 1447X": {
+    "idplano": 10,
+    "idforma": 99
+  },
+  "VALOR EM HAVER": {
+    "idplano": 10,
+    "idforma": 99
+  },
+  "VALOR EM HAVER 3235X": {
+    "idplano": 10,
+    "idforma": 99
+  },
+  "VESTI": {
+    "idplano": 10,
+    "idforma": 99
+  },
+  "VESTI 2037X": {
+    "idplano": 10,
+    "idforma": 99
+  }
 }

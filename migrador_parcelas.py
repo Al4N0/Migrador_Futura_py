@@ -62,7 +62,7 @@ class MigradorParcelas:
                 END AS idcliente,
                 C.FK_USUARIO AS idusuario,
                 P.DATA_EMISSAO AS data,
-                CP.DOCUMENTO AS documento,
+                LEFT(CP.DOCUMENTO, 14) AS documento,
                 CA.DESCRICAO AS pixcopiacola,
                 COALESCE(DATEDIFF(DAY FROM P.DATA_EMISSAO TO CP.DATA_VENCIMENTO), 0) AS prazo,
                 CP.DATA_VENCIMENTO AS vencimento,
@@ -163,8 +163,12 @@ class MigradorParcelas:
                 idplano_mapped = self.mapping_pagamento.get(forma)
                 
             if idplano_mapped is not None:
-                linha["idplano"] = idplano_mapped
-                linha["idforma"] = idplano_mapped
+                if isinstance(idplano_mapped, dict):
+                    linha["idplano"] = idplano_mapped.get("idplano")
+                    linha["idforma"] = idplano_mapped.get("idforma")
+                else:
+                    linha["idplano"] = idplano_mapped
+                    linha["idforma"] = idplano_mapped
             else:
                 linha["idplano"] = None
                 linha["idforma"] = None

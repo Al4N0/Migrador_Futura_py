@@ -106,6 +106,7 @@ class MigradorVendas:
                 id_loja=self.id_loja,
                 fk_empresa=self.fk_empresa,
                 mapa_idvenda=self.mapa_idvenda,
+                mapping_pagamento=self._mapping_pagamento,
                 log_callback=self.log,
             )
 
@@ -117,21 +118,7 @@ class MigradorVendas:
             finally:
                 cur_pre.close()
 
-            # 6c. Instanciar e pré-carregar MigradorParcelas
-            migrador_parcelas = MigradorParcelas(
-                fb_conn=self.fb,
-                my_conn=self.my,
-                id_loja=self.id_loja,
-                fk_empresa=self.fk_empresa,
-                mapa_idvenda=self.mapa_idvenda,
-                mapping_pagamento=self._mapping_pagamento,
-                log_callback=self.log,
-            )
-            cur_pre_parc = self.fb.conn.cursor()
-            try:
-                migrador_parcelas.pre_carregar(cur_pre_parc)
-            finally:
-                cur_pre_parc.close()
+
 
             # 6d. (Removido: Mapeamento agora é aplicado dinamicamente no loop _salvar_1a1)
 
@@ -220,9 +207,11 @@ class MigradorVendas:
                     forma_venda = ""
 
                 if forma_venda in self._mapping_pagamento:
-                    linha["idplano"] = self._mapping_pagamento[forma_venda]
+                    map_val = self._mapping_pagamento[forma_venda]
+                    linha["idplano"] = map_val.get("idplano") if isinstance(map_val, dict) else map_val
                 elif len(formas_distintas) == 1 and list(formas_distintas)[0] in self._mapping_pagamento:
-                    linha["idplano"] = self._mapping_pagamento[list(formas_distintas)[0]]
+                    map_val = self._mapping_pagamento[list(formas_distintas)[0]]
+                    linha["idplano"] = map_val.get("idplano") if isinstance(map_val, dict) else map_val
 
 
                 valores_venda = self._montar_valores_venda(linha, colunas_venda)
@@ -233,9 +222,8 @@ class MigradorVendas:
                     idvenda_mysql = cursor_my.lastrowid
                     self.mapa_idvenda[id_fb] = idvenda_mysql
 
-                    # ── INSERT itens e parcelas (mesmo cursor, mesma transação) ──
+                    # ── INSERT itens (mesmo cursor, mesma transação) ──
                     migrador_itens.inserir_por_venda(id_fb, cursor_fb, cursor_my)
-                    migrador_parcelas.inserir_por_venda(id_fb, cursor_fb, cursor_my)
 
                     # ── INSERT parcelas (do cache) ──
                     migrador_parcelas.inserir_por_venda(id_fb, cursor_my)
