@@ -13,6 +13,9 @@ from migrador_vendas import MigradorVendas
 from migrador_itens import MigradorItens
 from migrador_produtos import MigradorProdutos
 from migrador_estoque import MigradorEstoque
+from migrador_usuarios import MigradorUsuarios
+from migrador_fornecedores import MigradorFornecedores
+from migrador_vendedores import MigradorVendedores
 
 # Carrega as variáveis de ambiente do arquivo .env
 load_dotenv()
@@ -837,6 +840,39 @@ class AppMigrador(ctk.CTk):
         sep1 = ctk.CTkFrame(self.frame_sidebar, fg_color=COR_CARD, height=2)
         sep1.pack(fill="x", padx=20, pady=10)
 
+        # ── Botão Migrar Usuários ────────────────────────────────
+        self.frame_mig_usuario = self._criar_botao_migracao(
+            emoji="👤", titulo="Migrar Usuários",
+            cor_btn=COR_SUCCESS, cor_hover=COR_SUCCESS_HOVER,
+            comando=self.iniciar_migracao_usuarios
+        )
+
+        # ── Separador ────────────────────────────────────────────
+        sep1_b = ctk.CTkFrame(self.frame_sidebar, fg_color=COR_CARD, height=2)
+        sep1_b.pack(fill="x", padx=20, pady=10)
+
+        # ── Botão Migrar Fornecedores ────────────────────────────
+        self.frame_mig_fornecedor = self._criar_botao_migracao(
+            emoji="🚚", titulo="Migrar Fornecedores",
+            cor_btn=COR_SUCCESS, cor_hover=COR_SUCCESS_HOVER,
+            comando=self.iniciar_migracao_fornecedores
+        )
+
+        # ── Separador ────────────────────────────────────────────
+        sep1_c = ctk.CTkFrame(self.frame_sidebar, fg_color=COR_CARD, height=2)
+        sep1_c.pack(fill="x", padx=20, pady=10)
+
+        # ── Botão Migrar Vendedores ──────────────────────────────
+        self.frame_mig_vendedor = self._criar_botao_migracao(
+            emoji="💼", titulo="Migrar Vendedores",
+            cor_btn=COR_SUCCESS, cor_hover=COR_SUCCESS_HOVER,
+            comando=self.iniciar_migracao_vendedores
+        )
+
+        # ── Separador ────────────────────────────────────────────
+        sep1_d = ctk.CTkFrame(self.frame_sidebar, fg_color=COR_CARD, height=2)
+        sep1_d.pack(fill="x", padx=20, pady=10)
+
         # ── Botão Migrar Cliente ─────────────────────────────────
         self.frame_mig_cliente = self._criar_botao_migracao(
             emoji="👥", titulo="Migrar Cliente",
@@ -996,6 +1032,9 @@ class AppMigrador(ctk.CTk):
     def atualizar_estado_botoes(self):
         """Habilita/desabilita botões de migração conforme o estado."""
         estado = "normal" if self.conexoes_ok else "disabled"
+        self.frame_mig_usuario.btn.configure(state=estado)
+        self.frame_mig_fornecedor.btn.configure(state=estado)
+        self.frame_mig_vendedor.btn.configure(state=estado)
         self.frame_mig_cliente.btn.configure(state=estado)
         self.frame_mig_produto.btn.configure(state=estado)
         self.frame_mig_estoque.btn.configure(state=estado)
@@ -1164,6 +1203,165 @@ class AppMigrador(ctk.CTk):
 
     def abrir_configuracoes(self):
         JanelaConfiguracoes(self)
+
+    def iniciar_migracao_vendedores(self):
+        # Validar ID Loja
+        id_loja = self.validar_id_loja()
+        if id_loja is None:
+            return
+
+        self.log_message("\n💼 ===============================================")
+        self.log_message(f"💼 [Iniciando] Migração de Vendedores (Loja: {id_loja})")
+        self.log_message("💼 ===============================================")
+        self.frame_mig_vendedor.btn.configure(state="disabled")
+        self.iniciar_spinner("Migrando Vendedores...")
+
+        # Recuperar conexões do .env
+        load_dotenv(override=True)
+        path_fb = os.getenv("FB_PATH")
+        user_fb = os.getenv("FB_USER")
+        pass_fb = os.getenv("FB_PASS")
+        host_fb = os.getenv("FB_HOST", "localhost")
+        port_fb = int(os.getenv("FB_PORT", 3050))
+
+        host_my = os.getenv("MYSQL_HOST")
+        user_my = os.getenv("MYSQL_USER")
+        pass_my = os.getenv("MYSQL_PASS")
+        db_my = os.getenv("MYSQL_DB")
+
+        fb = ConexaoFirebird(path_fb, user_fb, pass_fb, host_fb, port_fb)
+        my = ConexaoMySQL(host_my, user_my, pass_my, db_my)
+
+        migrador = MigradorVendedores(fb, my, id_loja=id_loja, log_callback=self.log_message)
+
+        truncar_antes = self.frame_mig_vendedor.chk_var.get()
+
+        def thread_migracao():
+            caminho_log = self._abrir_log_arquivo("vendedores")
+            self.log_message(f"📄 Log salvo em: {caminho_log}")
+            try:
+                sucesso = migrador.executar(truncar=truncar_antes)
+                if sucesso:
+                    self.after(0, lambda: self.parar_spinner())
+                    self.after(50, lambda: self.atualizar_progresso(1.0, "✅ Concluído!"))
+                    self.log_message("✅ Migração de Vendedores concluída.")
+                else:
+                    self.after(0, lambda: self.parar_spinner())
+                    self.after(50, lambda: self.atualizar_progresso(0, "❌ Falhou"))
+                    self.log_message("❌ Migração de Vendedores falhou.")
+            except Exception as e:
+                self.log_message(f"❌ Erro inesperado: {e}")
+            finally:
+                self._fechar_log_arquivo()
+                self.after(0, lambda: self.frame_mig_vendedor.btn.configure(state="normal"))
+
+        threading.Thread(target=thread_migracao, daemon=True).start()
+
+    def iniciar_migracao_fornecedores(self):
+        # Validar ID Loja
+        id_loja = self.validar_id_loja()
+        if id_loja is None:
+            return
+
+        self.log_message("\n🚚 ===============================================")
+        self.log_message(f"🚚 [Iniciando] Migração de Fornecedores (Loja: {id_loja})")
+        self.log_message("🚚 ===============================================")
+        self.frame_mig_fornecedor.btn.configure(state="disabled")
+        self.iniciar_spinner("Migrando Fornecedores...")
+
+        # Recuperar conexões do .env
+        load_dotenv(override=True)
+        path_fb = os.getenv("FB_PATH")
+        user_fb = os.getenv("FB_USER")
+        pass_fb = os.getenv("FB_PASS")
+        host_fb = os.getenv("FB_HOST", "localhost")
+        port_fb = int(os.getenv("FB_PORT", 3050))
+
+        host_my = os.getenv("MYSQL_HOST")
+        user_my = os.getenv("MYSQL_USER")
+        pass_my = os.getenv("MYSQL_PASS")
+        db_my = os.getenv("MYSQL_DB")
+
+        fb = ConexaoFirebird(path_fb, user_fb, pass_fb, host_fb, port_fb)
+        my = ConexaoMySQL(host_my, user_my, pass_my, db_my)
+
+        migrador = MigradorFornecedores(fb, my, id_loja=id_loja, log_callback=self.log_message)
+
+        truncar_antes = self.frame_mig_fornecedor.chk_var.get()
+
+        def thread_migracao():
+            caminho_log = self._abrir_log_arquivo("fornecedores")
+            self.log_message(f"📄 Log salvo em: {caminho_log}")
+            try:
+                sucesso = migrador.executar(truncar=truncar_antes)
+                if sucesso:
+                    self.after(0, lambda: self.parar_spinner())
+                    self.after(50, lambda: self.atualizar_progresso(1.0, "✅ Concluído!"))
+                    self.log_message("✅ Migração de Fornecedores concluída.")
+                else:
+                    self.after(0, lambda: self.parar_spinner())
+                    self.after(50, lambda: self.atualizar_progresso(0, "❌ Falhou"))
+                    self.log_message("❌ Migração de Fornecedores falhou.")
+            except Exception as e:
+                self.log_message(f"❌ Erro inesperado: {e}")
+            finally:
+                self._fechar_log_arquivo()
+                self.after(0, lambda: self.frame_mig_fornecedor.btn.configure(state="normal"))
+
+        threading.Thread(target=thread_migracao, daemon=True).start()
+
+    def iniciar_migracao_usuarios(self):
+        # Validar ID Loja
+        id_loja = self.validar_id_loja()
+        if id_loja is None:
+            return
+
+        self.log_message("\n👤 ===============================================")
+        self.log_message(f"👤 [Iniciando] Migração de Usuários (Loja: {id_loja})")
+        self.log_message("👤 ===============================================")
+        self.frame_mig_usuario.btn.configure(state="disabled")
+        self.iniciar_spinner("Migrando Usuários...")
+
+        # Recuperar conexões do .env
+        load_dotenv(override=True)
+        path_fb = os.getenv("FB_PATH")
+        user_fb = os.getenv("FB_USER")
+        pass_fb = os.getenv("FB_PASS")
+        host_fb = os.getenv("FB_HOST", "localhost")
+        port_fb = int(os.getenv("FB_PORT", 3050))
+
+        host_my = os.getenv("MYSQL_HOST")
+        user_my = os.getenv("MYSQL_USER")
+        pass_my = os.getenv("MYSQL_PASS")
+        db_my = os.getenv("MYSQL_DB")
+
+        fb = ConexaoFirebird(path_fb, user_fb, pass_fb, host_fb, port_fb)
+        my = ConexaoMySQL(host_my, user_my, pass_my, db_my)
+
+        migrador = MigradorUsuarios(fb, my, id_loja=id_loja, log_callback=self.log_message)
+
+        truncar_antes = self.frame_mig_usuario.chk_var.get()
+
+        def thread_migracao():
+            caminho_log = self._abrir_log_arquivo("usuarios")
+            self.log_message(f"📄 Log salvo em: {caminho_log}")
+            try:
+                sucesso = migrador.executar(truncar=truncar_antes)
+                if sucesso:
+                    self.after(0, lambda: self.parar_spinner())
+                    self.after(50, lambda: self.atualizar_progresso(1.0, "✅ Concluído!"))
+                    self.log_message("✅ Migração de Usuários concluída.")
+                else:
+                    self.after(0, lambda: self.parar_spinner())
+                    self.after(50, lambda: self.atualizar_progresso(0, "❌ Falhou"))
+                    self.log_message("❌ Migração de Usuários falhou.")
+            except Exception as e:
+                self.log_message(f"❌ Erro inesperado: {e}")
+            finally:
+                self._fechar_log_arquivo()
+                self.after(0, lambda: self.frame_mig_usuario.btn.configure(state="normal"))
+
+        threading.Thread(target=thread_migracao, daemon=True).start()
 
     def iniciar_migracao_clientes(self):
         # Validar ID Loja
@@ -1458,7 +1656,7 @@ class AppMigrador(ctk.CTk):
             self.log_message(f"❌ Erro ao conectar no MySQL: {msg}")
             return
 
-        tabelas = ["item", "venda", "cliente"]  # item antes de venda por FK
+        tabelas = ["item", "venda", "cliente", "usuario", "fornecedor", "vendedor"]  # item antes de venda por FK
 
         try:
             cursor = my.conn.cursor()
